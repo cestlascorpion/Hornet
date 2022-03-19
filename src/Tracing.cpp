@@ -141,7 +141,6 @@ Scope Tracing::StartSpan(const string &context, const string &proc, const string
     }
 
     auto svr = op.str(); // proc name
-    transform(svr.begin(), svr.end(), svr.begin(), ::tolower);
     auto pv = trace::Provider::GetTracerProvider();
     auto tr = pv->GetTracer(svr.c_str(), OPENTELEMETRY_SDK_VERSION);
 
