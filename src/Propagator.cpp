@@ -16,13 +16,29 @@ constexpr size_t kBinCtxLen = kTraceLen + kSpanLen * 2u + kFlagLen + kSizeLen; /
 
 namespace endian {
 
-uint64_t htonll(uint64_t val) {
-    return (((uint64_t)::htonl(val)) << 32u) + ::htonl(val >> 32u);
-}
+#if (defined(__BYTE_ORDER__) && defined(__ORDER_LITTLE_ENDIAN__) && __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__)
+#define JAEGER_IS_LITTLE_ENDIAN 1
+#elif defined(__BYTE_ORDER__) && defined(__ORDER_BIG_ENDIAN__) && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+#define JAEGER_IS_LITTLE_ENDIAN 0
+#elif defined(_WIN32)
+#define JAEGER_IS_LITTLE_ENDIAN 1
+#else
+#error "Endian detection needs to be set up for your compiler"
+#endif
 
-uint64_t ntohll(uint64_t val) {
-    return (((uint64_t)::ntohl(val)) << 32u) + ::ntohl(val >> 32u);
+#if JAEGER_IS_LITTLE_ENDIAN == 1
+#if defined(__clang__) || (defined(__GNUC__) && ((__GNUC__ == 4 && __GNUC_MINOR__ >= 8) || __GNUC__ >= 5))
+inline uint64_t otel_bswap_64(uint64_t host_int) {
+    return __builtin_bswap64(host_int);
 }
+#elif defined(_MSC_VER)
+inline uint64_t otel_bswap_64(uint64_t host_int) {
+    return _byteswap_uint64(host_int);
+}
+#else
+#error "Port need to support endianess conversion"
+#endif
+#endif
 
 } // namespace endian
 
@@ -34,12 +50,12 @@ void Inject(const trace::SpanContext &ctx, context::propagation::TextMapCarrier 
     unsigned char buffer[kBinCtxLen];
     memset(buffer, 0, kBinCtxLen);
     // trace id
-    auto high = endian::htonll(*(uint64_t *)ctx.trace_id().Id().data());
-    auto low = endian::htonll(*(uint64_t *)(ctx.trace_id().Id().data() + kTraceLen / 2u));
+    auto high = (*(uint64_t *)ctx.trace_id().Id().data());
+    auto low = (*(uint64_t *)(ctx.trace_id().Id().data() + kTraceLen / 2u));
     *(uint64_t *)buffer = high;
     *(uint64_t *)(buffer + kTraceLen / 2u) = low;
     // span id
-    auto span = endian::htonll(*(uint64_t *)ctx.span_id().Id().data());
+    auto span = (*(uint64_t *)ctx.span_id().Id().data());
     *(uint64_t *)(buffer + kTraceLen) = span;
     // TODO: parent span id
     *(uint64_t *)(buffer + kTraceLen + kSpanLen) = 0;
@@ -81,17 +97,17 @@ trace::SpanContext Extract(const context::propagation::TextMapCarrier &car) {
         return trace::SpanContext::GetInvalid();
     }
     // trace id
-    auto high = endian::ntohll(*(uint64_t *)context.data());
-    auto low = endian::ntohll(*(uint64_t *)(context.data() + kTraceLen / 2u));
+    auto high = (*(uint64_t *)context.data());
+    auto low = (*(uint64_t *)(context.data() + kTraceLen / 2u));
     *(uint64_t *)context.data() = high;
     *(uint64_t *)(context.data() + kTraceLen / 2u) = low;
     trace::TraceId traceId({(uint8_t *)context.data(), kTraceLen});
     // span id
-    auto span = endian::ntohll(*(uint64_t *)(context.data() + kTraceLen));
+    auto span = (*(uint64_t *)(context.data() + kTraceLen));
     *(uint64_t *)(context.data() + kTraceLen) = span;
     trace::SpanId spanId({(uint8_t *)(context.data() + kTraceLen), kSpanLen});
     // parend span id
-    auto parent = endian::ntohll(*(uint64_t *)(context.data() + kTraceLen + kSpanLen));
+    auto parent = (*(uint64_t *)(context.data() + kTraceLen + kSpanLen));
     *(uint64_t *)(context.data() + kTraceLen + kSpanLen) = parent;
     trace::SpanId parentId({(uint8_t *)(context.data() + kTraceLen + kSpanLen), kSpanLen});
     // flag
@@ -186,15 +202,15 @@ Context::Context(const string &context)
         return;
     }
     trace::TraceId traceId({(uint8_t *)context.data(), kTraceLen});
-    auto high = endian::htonll(*(uint64_t *)traceId.Id().data());
-    auto low = endian::htonll(*(uint64_t *)(traceId.Id().data() + kTraceLen / 2u));
+    auto high = (*(uint64_t *)traceId.Id().data());
+    auto low = (*(uint64_t *)(traceId.Id().data() + kTraceLen / 2u));
     *(uint64_t *)traceId.Id().data() = high;
     *(uint64_t *)(traceId.Id().data() + kTraceLen / 2u) = low;
     trace::SpanId spanId({(uint8_t *)(context.data() + kTraceLen), kSpanLen});
-    auto span = endian::htonll(*(uint64_t *)spanId.Id().data());
+    auto span = (*(uint64_t *)spanId.Id().data());
     *(uint64_t *)spanId.Id().data() = span;
     trace::SpanId parendId({(uint8_t *)(context.data() + kTraceLen + kSpanLen), kSpanLen});
-    auto parent = endian::htonll(*(uint64_t *)parendId.Id().data());
+    auto parent = (*(uint64_t *)parendId.Id().data());
     *(uint64_t *)parendId.Id().data() = parent;
     trace::TraceFlags flag{*((uint8_t *)(context.data() + kTraceLen + kSpanLen * 2u))};
 
