@@ -21,7 +21,7 @@ foreach (_target
     target_link_libraries(${_target}
             ${PROJECT_BINARY_DIR}/libHornet.a
             opentelemetry_exporter_jaeger_trace
-            http_client_curl
+            opentelemetry_http_client_curl
             thrift
             opentelemetry_common
             curl
@@ -29,5 +29,7 @@ foreach (_target
             opentelemetry_trace
             opentelemetry_common
             opentelemetry_resources
-            opentelemetry_version)
+            opentelemetry_version
+            ringlog
+            yaml-cpp)
 endforeach ()

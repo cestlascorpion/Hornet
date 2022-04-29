@@ -1,5 +1,7 @@
 #include "Tracing.h"
 
+#include <rlog/rlog.h>
+
 #include <chrono>
 #include <iostream>
 #include <thread>
@@ -57,35 +59,44 @@ void f2() {
     auto ctx = Tracing::Instance()->StartSpan("", "test", "f1", SpanKind::kServer);
     this_thread::sleep_for(chrono::milliseconds(10));
 
-    auto ret = Tracing::ParseJaegerContext(Tracing::Instance()->GetJaegerContext());
+    auto ret = Tracing::ParseContext(Tracing::CurrentContext());
     cout << "->f2:" << ret._traceId << "-" << ret._spanId << "-" << ret._sampled << "-" << ret._parentSpanId << endl;
     Tracing::Instance()->EndSpan(move(ctx), 0);
 }
 
 void f1(const string &remote) {
-    auto ctx = Tracing::Instance()->StartSpan(remote, "test", "f0", SpanKind::kClient, uid, cmd, rot);
-    auto ret = Tracing::ParseJaegerContext(Tracing::Instance()->GetJaegerContext());
+    auto ctx = Tracing::Instance()->StartSpan(remote, "test", "f0", SpanKind::kClient, uid, cmd, remote.empty());
+    auto ret = Tracing::ParseContext(Tracing::CurrentContext());
     cout << "f1->:" << ret._traceId << "-" << ret._spanId << "-" << ret._sampled << "-" << ret._parentSpanId << endl;
 
     f2();
     this_thread::sleep_for(chrono::milliseconds(10));
 
-    ret = Tracing::ParseJaegerContext(Tracing::Instance()->GetJaegerContext());
+    ret = Tracing::ParseContext(Tracing::CurrentContext());
     cout << "->f1:" << ret._traceId << "-" << ret._spanId << "-" << ret._sampled << "-" << ret._parentSpanId << endl;
     Tracing::Instance()->EndSpan(move(ctx), 0);
 }
 
 int main() {
+    LOG_INIT(".", "test", LOG_LEVEL::DEBUG);
+
     char buffer[strlen(hexParentContext) / 2];
     if (!HexToBinary(hexParentContext, (uint8_t *)buffer, sizeof(buffer))) {
         cout << "invalid parent context" << endl;
         return 0;
     }
     cout << "----------------------------------------" << endl;
-    auto ctx = Tracing::ParseJaegerContext(string(buffer, sizeof(buffer)));
+    auto ctx = Tracing::ParseContext(string(buffer, sizeof(buffer)));
     cout << "f0:" << ctx._traceId << "-" << ctx._spanId << "-" << ctx._sampled << "-" << ctx._parentSpanId << endl;
     cout << "----------------------------------------" << endl;
-    f1(string(buffer, sizeof(buffer)));
+
+    for (auto i = 0; i < 300; i++) {
+        // f1(string(buffer, sizeof(buffer)));
+        f1("");
+        this_thread::sleep_for(chrono::seconds(1));
+    }
     cout << "----------------------------------------" << endl;
+
+    this_thread::sleep_for(chrono::milliseconds(1000));
     return 0;
 }

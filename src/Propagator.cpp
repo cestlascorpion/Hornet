@@ -2,8 +2,8 @@
 #include "Common.h"
 #include "Tracing.h"
 
-#include <netinet/in.h>
 #include <opentelemetry/trace/context.h>
+#include <rlog/rlog.h>
 
 using namespace std;
 using namespace opentelemetry;
@@ -14,58 +14,36 @@ constexpr size_t kFlagLen = sizeof(char);                                      /
 constexpr size_t kSizeLen = sizeof(uint32_t);                                  // 4
 constexpr size_t kBinCtxLen = kTraceLen + kSpanLen * 2u + kFlagLen + kSizeLen; // 37
 
-namespace endian {
-
-#if (defined(__BYTE_ORDER__) && defined(__ORDER_LITTLE_ENDIAN__) && __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__)
-#define JAEGER_IS_LITTLE_ENDIAN 1
-#elif defined(__BYTE_ORDER__) && defined(__ORDER_BIG_ENDIAN__) && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
-#define JAEGER_IS_LITTLE_ENDIAN 0
-#elif defined(_WIN32)
-#define JAEGER_IS_LITTLE_ENDIAN 1
-#else
-#error "Endian detection needs to be set up for your compiler"
-#endif
-
-#if JAEGER_IS_LITTLE_ENDIAN == 1
-#if defined(__clang__) || (defined(__GNUC__) && ((__GNUC__ == 4 && __GNUC_MINOR__ >= 8) || __GNUC__ >= 5))
-inline uint64_t otel_bswap_64(uint64_t host_int) {
-    return __builtin_bswap64(host_int);
-}
-#elif defined(_MSC_VER)
-inline uint64_t otel_bswap_64(uint64_t host_int) {
-    return _byteswap_uint64(host_int);
-}
-#else
-#error "Port need to support endianess conversion"
-#endif
-#endif
-
-} // namespace endian
-
 namespace detail {
 
-// context -> carrier
+// Inject: context -> carrier
 void Inject(const trace::SpanContext &ctx, context::propagation::TextMapCarrier &car) {
     // prepare buffer for trace-id span-id parent-span-id sample-flag baggage-number <- attention
     unsigned char buffer[kBinCtxLen];
     memset(buffer, 0, kBinCtxLen);
+
     // trace id
     auto high = (*(uint64_t *)ctx.trace_id().Id().data());
     auto low = (*(uint64_t *)(ctx.trace_id().Id().data() + kTraceLen / 2u));
     *(uint64_t *)buffer = high;
     *(uint64_t *)(buffer + kTraceLen / 2u) = low;
+
     // span id
     auto span = (*(uint64_t *)ctx.span_id().Id().data());
     *(uint64_t *)(buffer + kTraceLen) = span;
-    // TODO: parent span id
-    *(uint64_t *)(buffer + kTraceLen + kSpanLen) = 0;
+
+    // parent span id (actually not used)
+    // *(uint64_t *)(buffer + kTraceLen + kSpanLen) = 0;
+
     // flag
     buffer[kTraceLen + kSpanLen * 2u] = ctx.trace_flags().IsSampled() ? '1' : '0';
+
     // fast return
     if (ctx.trace_state()->Empty()) {
-        car.Set(tracing::kTraceContextOfJaegerBinaryFormat, nostd::string_view((char *)buffer, kBinCtxLen));
+        car.Set(tracing::jaeger::kBinaryFormat, nostd::string_view((char *)buffer, kBinCtxLen));
         return;
     }
+
     // get all baggage into content
     stringstream content;
     uint32_t num = 0u;
@@ -80,46 +58,56 @@ void Inject(const trace::SpanContext &ctx, context::propagation::TextMapCarrier 
         ++num;
         return true;
     });
-    // do not forget to correct baggage number
+
+    // do NOT forget to correct baggage number
     *((uint32_t *)(&buffer[kTraceLen + kSpanLen * 2u + kFlagLen])) = num;
+
     // construct trace context all-in-one
     stringstream context;
     context << string((char *)buffer, kBinCtxLen) << content.str();
-    car.Set(tracing::kTraceContextOfJaegerBinaryFormat, context.str());
+    car.Set(tracing::jaeger::kBinaryFormat, context.str());
 }
 
-// carrier -> context
+// Extract: carrier -> context
 trace::SpanContext Extract(const context::propagation::TextMapCarrier &car) {
-    // get trace context all-in-one
-    auto context = car.Get(tracing::kTraceContextOfJaegerBinaryFormat);
+    // get jaeger trace context all-in-one
+    auto context = car.Get(tracing::jaeger::kBinaryFormat);
+
     // fast return
     if (context.empty() || context.size() < kBinCtxLen) {
         return trace::SpanContext::GetInvalid();
     }
+
     // trace id
     auto high = (*(uint64_t *)context.data());
     auto low = (*(uint64_t *)(context.data() + kTraceLen / 2u));
     *(uint64_t *)context.data() = high;
     *(uint64_t *)(context.data() + kTraceLen / 2u) = low;
     trace::TraceId traceId({(uint8_t *)context.data(), kTraceLen});
+
     // span id
     auto span = (*(uint64_t *)(context.data() + kTraceLen));
     *(uint64_t *)(context.data() + kTraceLen) = span;
     trace::SpanId spanId({(uint8_t *)(context.data() + kTraceLen), kSpanLen});
-    // parend span id
-    auto parent = (*(uint64_t *)(context.data() + kTraceLen + kSpanLen));
-    *(uint64_t *)(context.data() + kTraceLen + kSpanLen) = parent;
-    trace::SpanId parentId({(uint8_t *)(context.data() + kTraceLen + kSpanLen), kSpanLen});
+
+    // parend span id (actually not used)
+    // auto parent = (*(uint64_t *)(context.data() + kTraceLen + kSpanLen));
+    // *(uint64_t *)(context.data() + kTraceLen + kSpanLen) = parent;
+    // trace::SpanId parentId({(uint8_t *)(context.data() + kTraceLen + kSpanLen), kSpanLen});
+
     // flag
     trace::TraceFlags flag{*((uint8_t *)(context.data() + kTraceLen + kSpanLen * 2u))};
+
     // get number of baggage which is well-known as trace-state
     unsigned char size[kSizeLen];
     memcpy(size, context.data() + kTraceLen + kSpanLen * 2u + kFlagLen, kSizeLen);
     auto baggage = *((uint32_t *)size);
+
     // fast return
     if (baggage == 0u) {
         return {traceId, spanId, flag, true};
     }
+
     // get all baggage
     auto state = trace::TraceState::GetDefault();
     size_t offset = kBinCtxLen;
@@ -149,6 +137,7 @@ trace::SpanContext Extract(const context::propagation::TextMapCarrier &car) {
         // write into trace state
         state = state->Set(key, val);
     }
+
     // finally
     return {traceId, spanId, flag, true, move(state)};
 }
@@ -185,7 +174,7 @@ context::Context CustomPropagator::Extract(const context::propagation::TextMapCa
 }
 
 bool CustomPropagator::Fields(nostd::function_ref<bool(nostd::string_view)> callback) const noexcept {
-    return callback(kTraceContextOfJaegerBinaryFormat);
+    return callback(jaeger::kBinaryFormat);
 }
 
 } // namespace tracing
@@ -201,22 +190,27 @@ Context::Context(const string &context)
     if (context.empty() || context.size() < kBinCtxLen) {
         return;
     }
+
     trace::TraceId traceId({(uint8_t *)context.data(), kTraceLen});
     auto high = (*(uint64_t *)traceId.Id().data());
     auto low = (*(uint64_t *)(traceId.Id().data() + kTraceLen / 2u));
     *(uint64_t *)traceId.Id().data() = high;
     *(uint64_t *)(traceId.Id().data() + kTraceLen / 2u) = low;
+
     trace::SpanId spanId({(uint8_t *)(context.data() + kTraceLen), kSpanLen});
     auto span = (*(uint64_t *)spanId.Id().data());
     *(uint64_t *)spanId.Id().data() = span;
+
     trace::SpanId parendId({(uint8_t *)(context.data() + kTraceLen + kSpanLen), kSpanLen});
     auto parent = (*(uint64_t *)parendId.Id().data());
     *(uint64_t *)parendId.Id().data() = parent;
+
     trace::TraceFlags flag{*((uint8_t *)(context.data() + kTraceLen + kSpanLen * 2u))};
 
     constexpr const size_t length = kTraceLen * 2u + kSpanLen * 2u + kSpanLen * 2u;
     char buffer[length];
     memset(buffer, 0, length);
+
     traceId.ToLowerBase16(nostd::span<char, kTraceLen * 2u>{&buffer[0], kTraceLen * 2u});
     spanId.ToLowerBase16(nostd::span<char, kSpanLen * 2u>{&buffer[kTraceLen * 2u], kSpanLen * 2u});
     parendId.ToLowerBase16(nostd::span<char, kSpanLen * 2u>{&buffer[kTraceLen * 2u + kSpanLen * 2u], kSpanLen * 2u});
@@ -238,6 +232,7 @@ Context::Context(const string &context)
     if (baggage == 0) {
         return;
     }
+
     size_t offset = kBinCtxLen;
     for (auto i = 0u; i < baggage; i++) {
         if (offset + kSizeLen > context.size()) {

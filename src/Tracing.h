@@ -10,6 +10,7 @@ namespace tracing {
 using SpanKind = opentelemetry::trace::SpanKind;
 
 struct Scope {
+public:
     Scope();
     Scope(opentelemetry::nostd::shared_ptr<opentelemetry::trace::Span> &&span,
           std::unique_ptr<opentelemetry::context::Token> &&token);
@@ -21,9 +22,11 @@ struct Scope {
     Scope(Scope &&) noexcept;
     Scope &operator=(Scope &&) noexcept;
 
-    // 添加属性值: 用于添加 StartSpan 无法获取的属性值
+public:
     void SetAttr(opentelemetry::nostd::string_view key, const opentelemetry::common::AttributeValue &value) noexcept;
 
+private:
+    friend class Tracing;
     opentelemetry::nostd::shared_ptr<opentelemetry::trace::Span> _span; // current span
     std::unique_ptr<opentelemetry::context::Token> _token; // scope which controls the life circle of the span
 };
@@ -45,22 +48,22 @@ public:
     ~Tracing();
 
 public:
-    // 开启 Span: context 在根结点处为空，其余节点为非空；返回值不可丢弃
-    Scope StartSpan(const std::string &context, // remote context (jaeger binary context)
-                    const std::string &proc,    // proc name
-                    const std::string &func,    // func name
-                    SpanKind kind,              // span kind
-                    unsigned uid = 0,           // user id
-                    unsigned cmd = 0,           // command id
-                    bool root = false);         // root of trace
-    // 结束 Span: 必须配合 StartSpan() 使用
-    void EndSpan(Scope &&context, int err = 0);
+    // StartSpan: create a new span
+    Scope StartSpan(const std::string &context,  // remote context (jaeger binary context, can be empty if root == true)
+                    const std::string &proc,     // proc name
+                    const std::string &func,     // func name
+                    SpanKind kind,               // span kind
+                    unsigned uid = 0,            // user id
+                    unsigned cmd = 0,            // command id
+                    bool root = false) noexcept; // root of trace
+    // EndSpan: end span with the given scope (from StartSpan())
+    void EndSpan(Scope &&context, int err = 0) noexcept;
 
 public:
-    // 获取当前 Context： jaeger binary context
-    static std::string GetJaegerContext();
-    // 解析已知 Context：jaeger binary context
-    static Context ParseJaegerContext(const std::string &context);
+    // CurrentContext: get current active context in jaeger binary format
+    static std::string CurrentContext() noexcept;
+    // ParseContext: parse context of jaeger binary format
+    static Context ParseContext(const std::string &context) noexcept;
 
 private:
     Tracing();
