@@ -27,6 +27,34 @@ constexpr int8_t kHexDigits[256] = {
     -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
 };
 
+namespace endian {
+
+#if (defined(__BYTE_ORDER__) && defined(__ORDER_LITTLE_ENDIAN__) && __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__)
+#define JAEGER_IS_LITTLE_ENDIAN 1
+#elif defined(__BYTE_ORDER__) && defined(__ORDER_BIG_ENDIAN__) && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+#define JAEGER_IS_LITTLE_ENDIAN 0
+#elif defined(_WIN32)
+#define JAEGER_IS_LITTLE_ENDIAN 1
+#else
+#error "Endian detection needs to be set up for your compiler"
+#endif
+
+#if JAEGER_IS_LITTLE_ENDIAN == 1
+#if defined(__clang__) || (defined(__GNUC__) && ((__GNUC__ == 4 && __GNUC_MINOR__ >= 8) || __GNUC__ >= 5))
+inline uint64_t otel_bswap_64(uint64_t host_int) {
+    return __builtin_bswap64(host_int);
+}
+#elif defined(_MSC_VER)
+inline uint64_t otel_bswap_64(uint64_t host_int) {
+    return _byteswap_uint64(host_int);
+}
+#else
+#error "Port need to support endianess conversion"
+#endif
+#endif
+
+} // namespace endian
+
 namespace detail {
 
 unsigned char HexToInt(char c) {
@@ -58,13 +86,13 @@ void Inject(const trace::SpanContext &ctx, context::propagation::TextMapCarrier 
     memset(buffer, 0, kBinCtxLen);
 
     // trace id
-    auto high = (*(uint64_t *)ctx.trace_id().Id().data());
-    auto low = (*(uint64_t *)(ctx.trace_id().Id().data() + kTraceLen / 2u));
+    auto high = endian::otel_bswap_64(*(uint64_t *)ctx.trace_id().Id().data());
+    auto low = endian::otel_bswap_64(*(uint64_t *)(ctx.trace_id().Id().data() + kTraceLen / 2u));
     *(uint64_t *)buffer = high;
     *(uint64_t *)(buffer + kTraceLen / 2u) = low;
 
     // span id
-    auto span = (*(uint64_t *)ctx.span_id().Id().data());
+    auto span = endian::otel_bswap_64(*(uint64_t *)ctx.span_id().Id().data());
     *(uint64_t *)(buffer + kTraceLen) = span;
 
     // parent span id (actually not used)
@@ -79,7 +107,7 @@ void Inject(const trace::SpanContext &ctx, context::propagation::TextMapCarrier 
         return;
     }
 
-    // get all baggage into content
+    // get all baggage into content, NOT SPECIFIED BY THE SPEC!
     stringstream content;
     uint32_t num = 0u;
     unsigned char size[kSizeLen];
@@ -94,7 +122,7 @@ void Inject(const trace::SpanContext &ctx, context::propagation::TextMapCarrier 
         return true;
     });
 
-    // do NOT forget to correct baggage number
+    // DO NOT forget to correct baggage number
     *((uint32_t *)(&buffer[kTraceLen + kSpanLen * 2u + kFlagLen])) = num;
 
     // construct trace context all-in-one
@@ -114,19 +142,19 @@ trace::SpanContext Extract(const context::propagation::TextMapCarrier &car) {
     }
 
     // trace id
-    auto high = (*(uint64_t *)context.data());
-    auto low = (*(uint64_t *)(context.data() + kTraceLen / 2u));
+    auto high = endian::otel_bswap_64(*(uint64_t *)context.data());
+    auto low = endian::otel_bswap_64(*(uint64_t *)(context.data() + kTraceLen / 2u));
     *(uint64_t *)context.data() = high;
     *(uint64_t *)(context.data() + kTraceLen / 2u) = low;
     trace::TraceId traceId({(uint8_t *)context.data(), kTraceLen});
 
     // span id
-    auto span = (*(uint64_t *)(context.data() + kTraceLen));
+    auto span = endian::otel_bswap_64(*(uint64_t *)(context.data() + kTraceLen));
     *(uint64_t *)(context.data() + kTraceLen) = span;
     trace::SpanId spanId({(uint8_t *)(context.data() + kTraceLen), kSpanLen});
 
     // parend span id (actually not used)
-    // auto parent = (*(uint64_t *)(context.data() + kTraceLen + kSpanLen));
+    // auto parent = endian::otel_bswap_64(*(uint64_t *)(context.data() + kTraceLen + kSpanLen));
     // *(uint64_t *)(context.data() + kTraceLen + kSpanLen) = parent;
     // trace::SpanId parentId({(uint8_t *)(context.data() + kTraceLen + kSpanLen), kSpanLen});
 
@@ -143,7 +171,7 @@ trace::SpanContext Extract(const context::propagation::TextMapCarrier &car) {
         return {traceId, spanId, flag, true};
     }
 
-    // get all baggage
+    // get all baggage, NOT SPECIFIED BY THE SPEC!
     auto state = trace::TraceState::GetDefault();
     size_t offset = kBinCtxLen;
     for (auto i = 0u; i < baggage; i++) {
@@ -227,18 +255,18 @@ Context::Context(const string &context)
     }
 
     trace::TraceId traceId({(uint8_t *)context.data(), kTraceLen});
-    auto high = (*(uint64_t *)traceId.Id().data());
-    auto low = (*(uint64_t *)(traceId.Id().data() + kTraceLen / 2u));
+    auto high = endian::otel_bswap_64(*(uint64_t *)traceId.Id().data());
+    auto low = endian::otel_bswap_64(*(uint64_t *)(traceId.Id().data() + kTraceLen / 2u));
     *(uint64_t *)traceId.Id().data() = high;
     *(uint64_t *)(traceId.Id().data() + kTraceLen / 2u) = low;
 
     trace::SpanId spanId({(uint8_t *)(context.data() + kTraceLen), kSpanLen});
-    auto span = (*(uint64_t *)spanId.Id().data());
+    auto span = endian::otel_bswap_64(*(uint64_t *)spanId.Id().data());
     *(uint64_t *)spanId.Id().data() = span;
 
-    trace::SpanId parendId({(uint8_t *)(context.data() + kTraceLen + kSpanLen), kSpanLen});
-    auto parent = (*(uint64_t *)parendId.Id().data());
-    *(uint64_t *)parendId.Id().data() = parent;
+    // trace::SpanId parendId({(uint8_t *)(context.data() + kTraceLen + kSpanLen), kSpanLen});
+    // auto parent = endian::otel_bswap_64(*(uint64_t *)parendId.Id().data());
+    // *(uint64_t *)parendId.Id().data() = parent;
 
     trace::TraceFlags flag{*((uint8_t *)(context.data() + kTraceLen + kSpanLen * 2u))};
 
@@ -248,7 +276,7 @@ Context::Context(const string &context)
 
     traceId.ToLowerBase16(nostd::span<char, kTraceLen * 2u>{&buffer[0], kTraceLen * 2u});
     spanId.ToLowerBase16(nostd::span<char, kSpanLen * 2u>{&buffer[kTraceLen * 2u], kSpanLen * 2u});
-    parendId.ToLowerBase16(nostd::span<char, kSpanLen * 2u>{&buffer[kTraceLen * 2u + kSpanLen * 2u], kSpanLen * 2u});
+    // parendId.ToLowerBase16(nostd::span<char, kSpanLen * 2u>{&buffer[kTraceLen * 2u + kSpanLen * 2u], kSpanLen * 2u});
 
     if (traceId.IsValid()) {
         _traceId = string(&buffer[0], kTraceLen * 2u);
@@ -256,9 +284,9 @@ Context::Context(const string &context)
     if (spanId.IsValid()) {
         _spanId = string(&buffer[kTraceLen * 2u], kSpanLen * 2u);
     }
-    if (parendId.IsValid()) {
-        _parentSpanId = string(&buffer[kTraceLen * 2u + kSpanLen * 2u], kSpanLen * 2u);
-    }
+    // if (parendId.IsValid()) {
+    //     _parentSpanId = string(&buffer[kTraceLen * 2u + kSpanLen * 2u], kSpanLen * 2u);
+    // }
     _sampled = flag.IsSampled();
 
     unsigned char size[kSizeLen];
