@@ -59,20 +59,20 @@ void f2() {
     auto ctx = Tracing::Instance()->StartSpan("", "test", "f1", SpanKind::kServer);
     this_thread::sleep_for(chrono::milliseconds(10));
 
-    auto ret = Tracing::ParseContext(Tracing::CurrentContext());
+    auto ret = Tracing::ParseFromJaegerContext(Tracing::CurrentJaegerContext());
     cout << "->f2:" << ret._traceId << "-" << ret._spanId << "-" << ret._sampled << "-" << ret._parentSpanId << endl;
     Tracing::Instance()->EndSpan(move(ctx), 0);
 }
 
 void f1(const string &remote) {
     auto ctx = Tracing::Instance()->StartSpan(remote, "test", "f0", SpanKind::kClient, uid, cmd, remote.empty());
-    auto ret = Tracing::ParseContext(Tracing::CurrentContext());
+    auto ret = Tracing::ParseFromJaegerContext(Tracing::CurrentJaegerContext());
     cout << "f1->:" << ret._traceId << "-" << ret._spanId << "-" << ret._sampled << "-" << ret._parentSpanId << endl;
 
     f2();
     this_thread::sleep_for(chrono::milliseconds(10));
 
-    ret = Tracing::ParseContext(Tracing::CurrentContext());
+    ret = Tracing::ParseFromJaegerContext(Tracing::CurrentJaegerContext());
     cout << "->f1:" << ret._traceId << "-" << ret._spanId << "-" << ret._sampled << "-" << ret._parentSpanId << endl;
     Tracing::Instance()->EndSpan(move(ctx), 0);
 }
@@ -85,12 +85,30 @@ int main() {
         cout << "invalid parent context" << endl;
         return 0;
     }
+
     cout << "----------------------------------------" << endl;
-    auto ctx = Tracing::ParseContext(string(buffer, sizeof(buffer)));
+    auto ctx = Tracing::ParseFromJaegerContext(string(buffer, sizeof(buffer)));
     cout << "f0:" << ctx._traceId << "-" << ctx._spanId << "-" << ctx._sampled << "-" << ctx._parentSpanId << endl;
+    for (const auto &item : ctx._baggage) {
+        cout << "\t" << item.first << ": " << item.second << endl;
+    }
+
+    {
+        auto jtx = Tracing::FormatAsJaegerContext(ctx);
+        if (strcmp(buffer, jtx.c_str()) != 0) {
+            cout << "FormatAsJaegerContext go wrong" << endl;
+            return 0;
+        }
+        auto ptx = Tracing::ParseFromJaegerContext(jtx);
+        cout << "p0:" << ptx._traceId << "-" << ptx._spanId << "-" << ptx._sampled << "-" << ptx._parentSpanId << endl;
+        for (const auto &item : ptx._baggage) {
+            cout << "\t" << item.first << ": " << item.second << endl;
+        }
+    }
+
     cout << "----------------------------------------" << endl;
 
-    for (auto i = 0; i < 300; i++) {
+    for (auto i = 0; i < 10; i++) {
         // f1(string(buffer, sizeof(buffer)));
         f1("");
         this_thread::sleep_for(chrono::seconds(1));
@@ -98,5 +116,6 @@ int main() {
     cout << "----------------------------------------" << endl;
 
     this_thread::sleep_for(chrono::milliseconds(1000));
+
     return 0;
 }

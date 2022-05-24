@@ -2,6 +2,7 @@
 #include "Common.h"
 #include "Tracing.h"
 
+#include <opentelemetry/context/propagation/global_propagator.h>
 #include <opentelemetry/trace/context.h>
 #include <rlog/rlog.h>
 
@@ -14,7 +15,41 @@ constexpr size_t kFlagLen = sizeof(char);                                      /
 constexpr size_t kSizeLen = sizeof(uint32_t);                                  // 4
 constexpr size_t kBinCtxLen = kTraceLen + kSpanLen * 2u + kFlagLen + kSizeLen; // 37
 
+constexpr int8_t kHexDigits[256] = {
+    -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+    -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, 0,  1,  2,  3,  4,  5,  6,  7,  8,  9,
+    -1, -1, -1, -1, -1, -1, -1, 10, 11, 12, 13, 14, 15, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+    -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, 10, 11, 12, 13, 14, 15, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+    -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+    -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+    -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+    -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+    -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+};
+
 namespace detail {
+
+unsigned char HexToInt(char c) {
+    return (unsigned char)kHexDigits[uint8_t(c)];
+}
+
+bool HexToBinary(const string &hex, uint8_t *buffer, size_t buffer_size) {
+    memset(buffer, 0, buffer_size);
+    if (hex.size() > buffer_size * 2) {
+        return false;
+    }
+    auto hex_size = (hex.size());
+    auto buffer_pos = buffer_size - (hex_size + 1) / 2;
+    auto last_hex_pos = hex_size - 1;
+    auto i = 0u;
+    for (; i < last_hex_pos; i += 2) {
+        buffer[buffer_pos++] = static_cast<uint8_t>((HexToInt(hex[i]) << 4) | HexToInt(hex[i + 1]));
+    }
+    if (i == last_hex_pos) {
+        buffer[buffer_pos] = HexToInt(hex[i]);
+    }
+    return true;
+}
 
 // Inject: context -> carrier
 void Inject(const trace::SpanContext &ctx, context::propagation::TextMapCarrier &car) {
@@ -182,9 +217,9 @@ bool CustomPropagator::Fields(nostd::function_ref<bool(nostd::string_view)> call
 namespace tracing {
 
 Context::Context(const string &context)
-    : _traceId("0")
-    , _spanId("0")
-    , _parentSpanId("0")
+    : _traceId("000000000000000000")
+    , _spanId("000000000")
+    , _parentSpanId("000000000")
     , _sampled(false)
     , _baggage() {
     if (context.empty() || context.size() < kBinCtxLen) {
@@ -257,6 +292,80 @@ Context::Context(const string &context)
         offset += valSize;
         _baggage.emplace(move(key), move(val));
     }
+}
+
+Context::Context(const trace::SpanContext &context)
+    : _traceId("000000000000000000")
+    , _spanId("000000000")
+    , _parentSpanId("000000000")
+    , _sampled(false)
+    , _baggage() {
+    if (!context.IsValid()) {
+        return;
+    }
+    char trace[kTraceLen * 2];
+    trace::TraceId(context.trace_id()).ToLowerBase16(trace);
+    char span[kSpanLen * 2];
+    trace::SpanId(context.span_id()).ToLowerBase16(span);
+
+    _traceId = string(trace, kTraceLen * 2);
+    _spanId = string(span, kSpanLen * 2);
+    _sampled = context.IsSampled();
+
+    context.trace_state()->GetAllEntries([&](nostd::string_view key, nostd::string_view val) noexcept -> bool {
+        _baggage.emplace(string(key.data(), key.size()), string(val.data(), val.size()));
+        return true;
+    });
+}
+
+Context Tracing::CurrentContext() noexcept {
+    auto ctx = context::RuntimeContext::GetCurrent();
+    return Context(trace::GetSpan(ctx)->GetContext());
+}
+
+string Tracing::CurrentJaegerContext() noexcept {
+    auto pr = context::propagation::GlobalTextMapPropagator::GetGlobalPropagator();
+    auto ctx = context::RuntimeContext::GetCurrent();
+    CustomCarrier carrier;
+    pr->Inject(carrier, ctx);
+
+    auto tc = carrier.Get(jaeger::kBinaryFormat);
+    return {tc.data(), tc.size()};
+}
+
+Context Tracing::ParseFromJaegerContext(const std::string &context) noexcept {
+    return Context(context);
+}
+
+string Tracing::FormatAsJaegerContext(const Context &context) noexcept {
+    if (context._traceId.size() != kTraceLen * 2u || context._spanId.size() != kSpanLen * 2u) {
+        return {};
+    }
+    unsigned char buffer[kTraceLen + kSpanLen + kSpanLen];
+    if (!detail::HexToBinary(context._traceId, buffer, kTraceLen)) {
+        return {};
+    }
+    trace::TraceId traceId({(uint8_t *)buffer, kTraceLen});
+    if (!detail::HexToBinary(context._spanId, buffer + kTraceLen, kSpanLen)) {
+        return {};
+    }
+    trace::SpanId spanId({(uint8_t *)buffer + kTraceLen, kSpanLen});
+    if (!detail::HexToBinary(context._parentSpanId, buffer + kTraceLen + kSpanLen, kSpanLen)) {
+        return {};
+    }
+    trace::SpanId parent({(uint8_t *)buffer + kTraceLen + kSpanLen, kSpanLen});
+    trace::TraceFlags flag(context._sampled ? trace::TraceFlags::kIsSampled : 0);
+    auto state = trace::TraceState::GetDefault();
+    for (const auto &item : context._baggage) {
+        state = state->Set(item.first, item.second);
+    }
+
+    trace::SpanContext ctx(traceId, spanId, flag, true, state);
+    CustomCarrier carrier;
+    detail::Inject(ctx, carrier);
+
+    auto tc = carrier.Get(jaeger::kBinaryFormat);
+    return {tc.data(), tc.size()};
 }
 
 } // namespace tracing

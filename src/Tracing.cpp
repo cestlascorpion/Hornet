@@ -18,8 +18,6 @@
 #include <rlog/rlog.h>
 #include <yaml-cpp/yaml.h>
 
-#include <csignal>
-
 using namespace std;
 using namespace opentelemetry;
 
@@ -228,20 +226,6 @@ void Tracing::EndSpan(Scope &&context, int err) noexcept {
         context._span->SetStatus(trace::StatusCode::kOk);
         context._span->End();
     }
-}
-
-Context Tracing::ParseContext(const std::string &context) noexcept {
-    return Context(context);
-}
-
-string Tracing::CurrentContext() noexcept {
-    auto pr = context::propagation::GlobalTextMapPropagator::GetGlobalPropagator();
-    auto ctx = context::RuntimeContext::GetCurrent();
-    CustomCarrier carrier;
-    pr->Inject(carrier, ctx);
-
-    auto tc = carrier.Get(jaeger::kBinaryFormat);
-    return {tc.data(), tc.size()};
 }
 
 } // namespace tracing

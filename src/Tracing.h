@@ -33,6 +33,7 @@ private:
 
 struct Context {
     explicit Context(const std::string &context);
+    explicit Context(const opentelemetry::trace::SpanContext &context);
 
     std::string _traceId;
     std::string _spanId;
@@ -60,10 +61,14 @@ public:
     void EndSpan(Scope &&context, int err = 0) noexcept;
 
 public:
-    // CurrentContext: get current active context in jaeger binary format
-    static std::string CurrentContext() noexcept;
-    // ParseContext: parse context of jaeger binary format
-    static Context ParseContext(const std::string &context) noexcept;
+    // CurrentContext: get current active context(plaintext format)
+    static Context CurrentContext() noexcept;
+    // CurrentJaegerContext: get current active context(jaeger binary format)
+    static std::string CurrentJaegerContext() noexcept;
+    // ParseFromJaegerContext: parse jaeger binary format context into plaintext context
+    static Context ParseFromJaegerContext(const std::string &context) noexcept;
+    // FormatAsJaegerContext: format plaintext context into jaeger binary format context
+    static std::string FormatAsJaegerContext(const Context &context) noexcept;
 
 private:
     Tracing();
