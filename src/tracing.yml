@@ -1,9 +1,7 @@
-agent:
-  log: true
-  host: 127.0.0.1
-  port: 6831
+reporter:
+  logSpans: false
+  localAgentHostPort: 127.0.0.1:6831
 sampler:
-  ratio: 100
+  ratio: 50
   white-list:
-    - 12345678
-    - 87654321
+    - 107274449

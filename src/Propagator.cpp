@@ -4,7 +4,6 @@
 
 #include <opentelemetry/context/propagation/global_propagator.h>
 #include <opentelemetry/trace/context.h>
-#include <rlog/rlog.h>
 
 using namespace std;
 using namespace opentelemetry;
@@ -95,7 +94,7 @@ void Inject(const trace::SpanContext &ctx, context::propagation::TextMapCarrier 
     auto span = endian::otel_bswap_64(*(uint64_t *)ctx.span_id().Id().data());
     *(uint64_t *)(buffer + kTraceLen) = span;
 
-    // parent span id (actually not used)
+    // parent span id: unnecessary
     // *(uint64_t *)(buffer + kTraceLen + kSpanLen) = 0;
 
     // flag
@@ -153,7 +152,7 @@ trace::SpanContext Extract(const context::propagation::TextMapCarrier &car) {
     *(uint64_t *)(context.data() + kTraceLen) = span;
     trace::SpanId spanId({(uint8_t *)(context.data() + kTraceLen), kSpanLen});
 
-    // parend span id (actually not used)
+    // parend span id: unnecessary
     // auto parent = endian::otel_bswap_64(*(uint64_t *)(context.data() + kTraceLen + kSpanLen));
     // *(uint64_t *)(context.data() + kTraceLen + kSpanLen) = parent;
     // trace::SpanId parentId({(uint8_t *)(context.data() + kTraceLen + kSpanLen), kSpanLen});
@@ -346,12 +345,20 @@ Context::Context(const trace::SpanContext &context)
     });
 }
 
-Context Tracing::CurrentContext() noexcept {
+Context::Context(const string &traceId, const string &spanId, const string &parentSpanId, bool sampled,
+                 const map<string, string> &baggage)
+    : _traceId(traceId)
+    , _spanId(spanId)
+    , _parentSpanId(parentSpanId)
+    , _sampled(sampled)
+    , _baggage(baggage) {}
+
+Context Tracing::GetPlainTextContext() noexcept {
     auto ctx = context::RuntimeContext::GetCurrent();
     return Context(trace::GetSpan(ctx)->GetContext());
 }
 
-string Tracing::CurrentJaegerContext() noexcept {
+string Tracing::GetJaegerContext() noexcept {
     auto pr = context::propagation::GlobalTextMapPropagator::GetGlobalPropagator();
     auto ctx = context::RuntimeContext::GetCurrent();
     CustomCarrier carrier;
@@ -361,7 +368,7 @@ string Tracing::CurrentJaegerContext() noexcept {
     return {tc.data(), tc.size()};
 }
 
-Context Tracing::ParseFromJaegerContext(const std::string &context) noexcept {
+Context Tracing::ParseFromJaegerContext(const string &context) noexcept {
     return Context(context);
 }
 
