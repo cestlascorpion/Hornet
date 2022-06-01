@@ -20,6 +20,7 @@ foreach (_target
     add_executable(${_target} "test/${_target}.cpp")
     target_link_libraries(${_target}
             ${PROJECT_BINARY_DIR}/libHornet.a
+            opentelemetry_exporter_zipkin_trace
             opentelemetry_exporter_jaeger_trace
             opentelemetry_http_client_curl
             thrift

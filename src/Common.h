@@ -1,6 +1,12 @@
 #pragma once
 
+#include <opentelemetry/trace/span_id.h>
 #include <opentelemetry/trace/trace_id.h>
+
+//#define OSTREAM_EXPORTER_DEBUG
+#define ENABLE_RLOG
+// #define JAEGER_EXPORTER
+#define ZIPKIN_EXPORTER
 
 namespace tracing {
 

@@ -1,6 +1,7 @@
 reporter:
-  logSpans: false
-  localAgentHostPort: 127.0.0.1:6831
+  logSpans: true
+  jaegerEndpoint: 127.0.0.1:6831
+  ZipkinEndpoint: http://localhost:9411/api/v2/spans
 sampler:
   ratio: 50
   white-list:

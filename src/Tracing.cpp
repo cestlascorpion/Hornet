@@ -1,21 +1,25 @@
 #include "Tracing.h"
 #include "Common.h"
+#include "LogHandler.h"
 #include "Propagator.h"
 #include "Sampler.h"
 
-// #define OSTREAM_EXPORTER_DEBUG
-#define ENABLE_RLOG
-
 #include <opentelemetry/context/propagation/global_propagator.h>
+#ifdef JAEGER_EXPORTER
 #include <opentelemetry/exporters/jaeger/jaeger_exporter.h>
+#else
+#include <opentelemetry/exporters/zipkin/zipkin_exporter.h>
+#endif
 #ifdef OSTREAM_EXPORTER_DEBUG
 #include <opentelemetry/exporters/ostream/span_exporter.h>
 #endif
+#include <opentelemetry/sdk/common/global_log_handler.h>
 #include <opentelemetry/sdk/resource/resource.h>
 #include <opentelemetry/sdk/trace/batch_span_processor.h>
 #include <opentelemetry/sdk/trace/samplers/parent.h>
 #include <opentelemetry/sdk/trace/tracer_provider.h>
 #include <opentelemetry/trace/provider.h>
+
 #ifdef ENABLE_RLOG
 #include <rlog/rlog.h>
 #endif
@@ -108,9 +112,12 @@ void IsolatedScope::SetAttr(nostd::string_view key, const common::AttributeValue
 
 struct Tracing::TraceConf {
     TraceConf()
-        : _host("127.0.0.1")
-        , _port(6831)
-        , _logSpan(false) {
+        : _logSpan(false)
+#ifdef JAEGER_EXPORTER
+        , _address("localhost:6831") {
+#else
+        , _address("http://localhost:9411/api/v2/spans") {
+#endif
         const char *path = getenv(k_DefaultPathEnv);
         if (path == nullptr || strlen(path) == 0) {
 #ifdef ENABLE_RLOG
@@ -130,7 +137,7 @@ struct Tracing::TraceConf {
         auto config = YAML::LoadFile(path);
         if (config.IsNull() || !config.IsMap()) {
 #ifdef ENABLE_RLOG
-            LOG_WARN("load root failed, use default addr %s:%u log %d", _host.c_str(), _port, _logSpan);
+            LOG_WARN("load root failed, use default addr %s log %d", _address.c_str(), _logSpan);
 #endif
             return;
         }
@@ -138,7 +145,7 @@ struct Tracing::TraceConf {
         auto reporter = config["reporter"];
         if (reporter.IsNull() || !reporter.IsMap()) {
 #ifdef ENABLE_RLOG
-            LOG_WARN("load reporter failed, use default addr %s:%u log %d", _host.c_str(), _port, _logSpan);
+            LOG_WARN("load reporter failed, use default addr %s log %d", _address.c_str(), _logSpan);
 #endif
             return;
         }
@@ -147,32 +154,44 @@ struct Tracing::TraceConf {
         if (!logSpans.IsNull() && logSpans.IsScalar()) {
             _logSpan = logSpans.as<bool>();
         }
-        auto localAgentHostPort = reporter["localAgentHostPort"];
-        if (!localAgentHostPort.IsNull() && localAgentHostPort.IsScalar()) {
-            auto hostPort = localAgentHostPort.as<string>();
-            auto pos = hostPort.find(":");
-            if (pos != string::npos) {
-                _host = hostPort.substr(0, pos);
-                _port = (uint16_t)atoi(hostPort.substr(pos + 1).c_str());
-            }
+#ifdef JAEGER_EXPORTER
+        auto jaegerEndpoint = reporter["jaegerEndpoint"];
+        if (!jaegerEndpoint.IsNull() && jaegerEndpoint.IsScalar()) {
+            _address = jaegerEndpoint.as<string>();
         }
+#else
+        auto zipkinEndpoint = reporter["zipkinEndpoint"];
+        if (!zipkinEndpoint.IsNull() && zipkinEndpoint.IsScalar()) {
+            _address = zipkinEndpoint.as<string>();
+        }
+#endif
+
 #ifdef ENABLE_RLOG
-        LOG_INFO("load config success, addr %s:%u log %d", _host.c_str(), _port, _logSpan);
+        LOG_INFO("load config success, addr %s log %d", _address.c_str(), _logSpan);
 #endif
     }
 
-    string _host;
-    uint16_t _port;
     bool _logSpan;
+    string _address;
 };
 
 Tracing::Tracing()
     : _conf(new TraceConf) {
-
+    auto lh = nostd::shared_ptr<sdk::common::internal_log::LogHandler>(new CustomLogHandler());
+    sdk::common::internal_log::GlobalLogHandler::SetLogHandler(move(lh));
+    sdk::common::internal_log::GlobalLogHandler::SetLogLevel(_conf->_logSpan? sdk::common::internal_log::LogLevel::Debug: sdk::common::internal_log::LogLevel::Info);
+#ifdef JAEGER_EXPORTER
     exporter::jaeger::JaegerExporterOptions exOpts{};
-    exOpts.endpoint = _conf->_host;
-    exOpts.server_port = _conf->_port;
+    auto pos = _conf->_address.find(':');
+    exOpts.endpoint =   _conf->_address.substr(0, pos);
+    exOpts.server_port =(uint16_t)atoi( _conf->_address.substr(pos + 1).c_str());
     auto e = unique_ptr<sdk::trace::SpanExporter>(new exporter::jaeger::JaegerExporter(exOpts));
+#else
+    exporter::zipkin::ZipkinExporterOptions exOpts{};
+    exOpts.endpoint = _conf->_address;
+    exOpts.service_name = detail::GetProcName();
+    auto e = unique_ptr<sdk::trace::SpanExporter>(new exporter::zipkin::ZipkinExporter());
+#endif
 
     auto prOpts = sdk::trace::BatchSpanProcessorOptions{};
 #ifdef OSTREAM_EXPORTER_DEBUG
