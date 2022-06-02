@@ -44,6 +44,10 @@ public:
     IsolatedScope &operator=(IsolatedScope &&) noexcept;
 
 public:
+    std::string GetContext() noexcept;
+    std::string GetTraceId() noexcept;
+
+public:
     void SetAttr(opentelemetry::nostd::string_view key, const opentelemetry::common::AttributeValue &value) noexcept;
 
 private:

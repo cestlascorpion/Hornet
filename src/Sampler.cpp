@@ -5,8 +5,6 @@
 #include <random>
 #include <set>
 
-#define ENABLE_RLOG
-
 #ifdef ENABLE_RLOG
 #include <rlog/rlog.h>
 #endif

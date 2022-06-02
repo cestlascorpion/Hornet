@@ -104,6 +104,16 @@ IsolatedScope &IsolatedScope::operator=(IsolatedScope &&isc) noexcept {
     return *this;
 }
 
+string IsolatedScope::GetContext() noexcept {
+    return _ctx;
+}
+
+string IsolatedScope::GetTraceId() noexcept {
+    char trace[32];
+    _span->GetContext().trace_id().ToLowerBase16(trace);
+    return string(trace, sizeof(trace));
+}
+
 void IsolatedScope::SetAttr(nostd::string_view key, const common::AttributeValue &value) noexcept {
     if (_span != nullptr) {
         _span->SetAttribute(key, value);
