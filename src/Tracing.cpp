@@ -20,11 +20,9 @@
 #include <opentelemetry/sdk/trace/tracer_provider.h>
 #include <opentelemetry/trace/provider.h>
 
-#ifdef ENABLE_RLOG
-#include <rlog/rlog.h>
-#endif
-#include <unistd.h>
 #include <yaml-cpp/yaml.h>
+
+#include <unistd.h>
 
 using namespace std;
 using namespace opentelemetry;
@@ -130,33 +128,21 @@ struct Tracing::TraceConf {
 #endif
         const char *path = getenv(k_DefaultPathEnv);
         if (path == nullptr || strlen(path) == 0) {
-#ifdef ENABLE_RLOG
-            LOG_WARN("k_DefaultPathEnv not found, use default path %s", k_DefaultPath);
-#endif
             path = k_DefaultPath;
         }
 
         int ret = access(path, F_OK);
         if (ret != 0) {
-#ifdef ENABLE_RLOG
-            LOG_WARN("path %s not exist, please check it", path);
-#endif
             return;
         }
 
         auto config = YAML::LoadFile(path);
         if (config.IsNull() || !config.IsMap()) {
-#ifdef ENABLE_RLOG
-            LOG_WARN("load root failed, use default addr %s log %d", _address.c_str(), _logSpan);
-#endif
             return;
         }
 
         auto reporter = config["reporter"];
         if (reporter.IsNull() || !reporter.IsMap()) {
-#ifdef ENABLE_RLOG
-            LOG_WARN("load reporter failed, use default addr %s log %d", _address.c_str(), _logSpan);
-#endif
             return;
         }
 
@@ -175,10 +161,6 @@ struct Tracing::TraceConf {
             _address = zipkinEndpoint.as<string>();
         }
 #endif
-
-#ifdef ENABLE_RLOG
-        LOG_INFO("load config success, addr %s log %d", _address.c_str(), _logSpan);
-#endif
     }
 
     bool _logSpan;
@@ -189,12 +171,13 @@ Tracing::Tracing()
     : _conf(new TraceConf) {
     auto lh = nostd::shared_ptr<sdk::common::internal_log::LogHandler>(new CustomLogHandler());
     sdk::common::internal_log::GlobalLogHandler::SetLogHandler(move(lh));
-    sdk::common::internal_log::GlobalLogHandler::SetLogLevel(_conf->_logSpan? sdk::common::internal_log::LogLevel::Debug: sdk::common::internal_log::LogLevel::Info);
+    sdk::common::internal_log::GlobalLogHandler::SetLogLevel(
+        _conf->_logSpan ? sdk::common::internal_log::LogLevel::Debug : sdk::common::internal_log::LogLevel::Info);
 #ifdef JAEGER_EXPORTER
     exporter::jaeger::JaegerExporterOptions exOpts{};
     auto pos = _conf->_address.find(':');
-    exOpts.endpoint =   _conf->_address.substr(0, pos);
-    exOpts.server_port =(uint16_t)atoi( _conf->_address.substr(pos + 1).c_str());
+    exOpts.endpoint = _conf->_address.substr(0, pos);
+    exOpts.server_port = (uint16_t)atoi(_conf->_address.substr(pos + 1).c_str());
     auto e = unique_ptr<sdk::trace::SpanExporter>(new exporter::jaeger::JaegerExporter(exOpts));
 #else
     exporter::zipkin::ZipkinExporterOptions exOpts{};
@@ -283,10 +266,7 @@ Scope Tracing::StartSpan(const string &context, const string &proc, const string
     auto span = tr->StartSpan(name.c_str(), extra, spOpts);
     auto token = context::RuntimeContext::Attach(context::RuntimeContext::GetCurrent().SetValue(trace::kSpanKey, span));
     if (_conf->_logSpan) {
-#ifdef ENABLE_RLOG
-        LOG_DEBUG("trace id %s span id %s sampled %d", FormatTraceId(span->GetContext().trace_id()).c_str(),
-                  FormatSpanId(span->GetContext().span_id()).c_str(), span->GetContext().IsSampled());
-#endif
+        // TODO
     }
     return Scope{move(span), move(token)};
 }
@@ -296,11 +276,7 @@ void Tracing::EndSpan(Scope &&context, int err, opentelemetry::nostd::string_vie
         context._span->SetAttribute(kTraceTagErr, err);
         context._span->SetStatus(err == 0 ? trace::StatusCode::kOk : trace::StatusCode::kError, msg);
         if (_conf->_logSpan) {
-#ifdef ENABLE_RLOG
-            LOG_DEBUG(
-                "trace id %s span id %s sampled %d", FormatTraceId(context._span->GetContext().trace_id()).c_str(),
-                FormatSpanId(context._span->GetContext().span_id()).c_str(), context._span->GetContext().IsSampled());
-#endif
+            // TODO
         }
         context._span->End();
     }
@@ -356,10 +332,7 @@ IsolatedScope Tracing::StartIsolatedSpan(const string &context, const string &pr
 
     auto tc = carrier.Get(jaeger::kBinaryFormat);
     if (_conf->_logSpan) {
-#ifdef ENABLE_RLOG
-        LOG_DEBUG("trace id %s span id %s sampled %d", FormatTraceId(span->GetContext().trace_id()).c_str(),
-                  FormatSpanId(span->GetContext().span_id()).c_str(), span->GetContext().IsSampled());
-#endif
+        // TODO
     }
     return IsolatedScope{string(tc.data(), tc.size()), move(span)};
 }
@@ -369,11 +342,7 @@ void Tracing::EndIsolatedSpan(IsolatedScope &&context, int err, opentelemetry::n
         context._span->SetAttribute(kTraceTagErr, err);
         context._span->SetStatus(err == 0 ? trace::StatusCode::kOk : trace::StatusCode::kError, msg);
         if (_conf->_logSpan) {
-#ifdef ENABLE_RLOG
-            LOG_DEBUG(
-                "trace id %s span id %s sampled %d", FormatTraceId(context._span->GetContext().trace_id()).c_str(),
-                FormatSpanId(context._span->GetContext().span_id()).c_str(), context._span->GetContext().IsSampled());
-#endif
+            // TODO
         }
         context._span->End();
     }

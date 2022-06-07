@@ -1,16 +1,13 @@
 #include "Sampler.h"
 #include "Common.h"
 
+#include <yaml-cpp/yaml.h>
+
 #include <atomic>
 #include <random>
 #include <set>
-
-#ifdef ENABLE_RLOG
-#include <rlog/rlog.h>
-#endif
 #include <sys/stat.h>
 #include <unistd.h>
-#include <yaml-cpp/yaml.h>
 
 using namespace std;
 using namespace opentelemetry;
@@ -48,17 +45,10 @@ public:
 
         const char *path = getenv(tracing::k_DefaultPathEnv);
         if (path == nullptr || strlen(path) == 0) {
-#ifdef ENABLE_RLOG
-            LOG_WARN("k_DefaultPathEnv not found, use default path %s", tracing::k_DefaultPath);
-#endif
             _path = tracing::k_DefaultPath;
         } else {
             _path = path;
         }
-
-#ifdef ENABLE_RLOG
-        LOG_INFO("trace config path %s", _path);
-#endif
 
         unsigned ratio;
         set<unsigned> list;
@@ -66,19 +56,11 @@ public:
             _ratio.store(ratio, std::memory_order_relaxed);
             _uidList[_idx.load(memory_order_relaxed)].swap(list);
         }
-
-#ifdef ENABLE_RLOG
-        LOG_INFO("sample ratio %u white list %s", _ratio.load(memory_order_relaxed),
-                 FormatSet(_uidList[_idx.load(memory_order_relaxed)]).c_str());
-#endif
     }
 
 public:
     bool CheckPass(unsigned uid, unsigned cmd, bool rot) {
         if (!rot) {
-#ifdef ENABLE_RLOG
-            LOG_TRACE("not root node, disable sample decision");
-#endif
             return false;
         }
 
@@ -105,15 +87,9 @@ public:
         // some fast decision
         auto ratio = _ratio.load(memory_order_relaxed); // [0, 10000]
         if (ratio == 0) {
-#ifdef ENABLE_RLOG
-            LOG_TRACE("fast decision: sampled ration = 0");
-#endif
             return false;
         }
         if (ratio == tracing::kMaxRatioValue) {
-#ifdef ENABLE_RLOG
-            LOG_TRACE("fast decision: sampled ration = %u", tracing::kMaxRatioValue);
-#endif
             return true;
         }
 
@@ -124,9 +100,6 @@ public:
             if (cmd > 0 && cmd < tracing::kMaxCmdValue) {
                 _cmdList[cmd].store(now, memory_order_relaxed);
             }
-#ifdef ENABLE_RLOG
-            LOG_TRACE("hit white list: uid %u", uid);
-#endif
             return true;
         }
 
@@ -136,9 +109,6 @@ public:
             if (cmd > 0 && cmd < tracing::kMaxCmdValue) {
                 _cmdList[cmd] = now;
             }
-#ifdef ENABLE_RLOG
-            LOG_TRACE("hit ratio: r %u < ratio %u", r, ratio);
-#endif
             return true;
         }
 
@@ -147,41 +117,26 @@ public:
             auto last = _cmdList[cmd].load(memory_order_relaxed);
             if (now > last + tracing::kMaxInterval) {
                 _cmdList[cmd].compare_exchange_weak(last, now, memory_order_relaxed);
-#ifdef ENABLE_RLOG
-                LOG_TRACE("hit min-sample-interval: cmd %u", cmd);
-#endif
                 return true;
             }
         }
 
-#ifdef ENABLE_RLOG
-        LOG_TRACE("hit missing: do not sample %u %u", uid, cmd);
-#endif
         return false;
     }
 
 private:
     static bool loadRatioAndWhiteList(const char *path, unsigned &r, set<unsigned> &s) {
         if (access(path, F_OK) != 0) {
-#ifdef ENABLE_RLOG
-            LOG_WARN("path %s not exist, please check it", path);
-#endif
             return false;
         }
 
         auto root = YAML::LoadFile(path);
         if (root.IsNull() || !root.IsMap()) {
-#ifdef ENABLE_RLOG
-            LOG_WARN("load root failed, path %s", path);
-#endif
             return false;
         }
 
         auto sampler = root["sampler"];
         if (sampler.IsNull() || !sampler.IsMap()) {
-#ifdef ENABLE_RLOG
-            LOG_WARN("load sampler failed, path %s", path);
-#endif
             return false;
         }
         auto ratio = sampler["ratio"];
@@ -197,9 +152,6 @@ private:
             s = set<unsigned int>(l.begin(), l.end());
         }
 
-#ifdef ENABLE_RLOG
-        LOG_WARN("load sampler success, ratio %u white list size %lu", r, s.size());
-#endif
         return true;
     }
 

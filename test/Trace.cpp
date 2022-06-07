@@ -1,14 +1,8 @@
 #include "Tracing.h"
 
-#define ENABLE_RLOG
-
 #include <chrono>
 #include <iostream>
 #include <thread>
-
-#ifdef ENABLE_RLOG
-#include <rlog/rlog.h>
-#endif
 
 using namespace std;
 using namespace tracing;
@@ -87,10 +81,6 @@ void F3() {
 }
 
 int main() {
-#ifdef ENABLE_RLOG
-    LOG_INIT(".", "tester", LOG_LEVEL::TRACE);
-#endif
-
     char buffer[strlen(hexParentContext) / 2];
     if (!HexToBinary(hexParentContext, (uint8_t *)buffer, sizeof(buffer))) {
         cout << "invalid parent context" << endl;

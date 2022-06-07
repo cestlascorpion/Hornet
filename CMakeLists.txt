@@ -31,6 +31,5 @@ foreach (_target
             opentelemetry_common
             opentelemetry_resources
             opentelemetry_version
-            ringlog
             yaml-cpp)
 endforeach ()
