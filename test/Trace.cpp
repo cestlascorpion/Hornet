@@ -8,13 +8,14 @@ using namespace std;
 using namespace tracing;
 using namespace opentelemetry;
 
-constexpr const char *hexParentContext =
-    "0000000000000000a03bb80ba85889b2"
-    "ebb15cfc5df6613f"
-    "a03bb80ba85889b2"
-    "310300000"
-    "005000000"
-    "636f6e676f0b0000007436317263576b674d7a45030000006b65790500000076616c756504000000776861740300000077686f";
+constexpr const char *hexParentContext = "FEA80376EE0C6F9F"
+                                         "EC9C673F09F6EAE1" // 9f6f0cee7603a8fee1eaf6093f679cec
+                                         "9E5304AE5F1682BB" // bb82165fae04539e
+                                         "0000000000000000" // 000000000
+                                         "01000000"         // true
+                                         "01000000"
+                                         "0870796A5F746573740000000B68656C6C6F20776F726C64";
+
 constexpr const unsigned cmd = 10u;
 constexpr const unsigned uid = 12345678u;
 
@@ -109,25 +110,17 @@ int main() {
 
     cout << "----------------------------------------" << endl;
 
-    for (auto i = 0; i < 30; i++) {
-        F1(string(buffer, sizeof(buffer)));
-        this_thread::sleep_for(chrono::seconds(2));
-    }
+    F1(string(buffer, sizeof(buffer)));
+    this_thread::sleep_for(chrono::seconds(2));
 
     cout << "----------------------------------------" << endl;
 
-    for (auto i = 0; i < 100; i++) {
-        F1("");
-        this_thread::sleep_for(chrono::seconds(2));
-    }
+    F1("");
+    this_thread::sleep_for(chrono::seconds(2));
+
     cout << "----------------------------------------" << endl;
-
-    for (auto i = 0; i < 100; i++) {
-        F3();
-        this_thread::sleep_for(chrono::seconds(2));
-    }
-
-    this_thread::sleep_for(chrono::milliseconds(1000));
+    F3();
+    this_thread::sleep_for(chrono::seconds(2));
 
     return 0;
 }

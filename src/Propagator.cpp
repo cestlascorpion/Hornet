@@ -2,6 +2,8 @@
 #include "Common.h"
 #include "Tracing.h"
 
+#include <endian.h>
+
 #include <opentelemetry/context/propagation/global_propagator.h>
 #include <opentelemetry/trace/context.h>
 
@@ -28,29 +30,29 @@ constexpr int8_t kHexDigits[256] = {
 
 namespace endian {
 
-#if (defined(__BYTE_ORDER__) && defined(__ORDER_LITTLE_ENDIAN__) && __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__)
-#define JAEGER_IS_LITTLE_ENDIAN 1
-#elif defined(__BYTE_ORDER__) && defined(__ORDER_BIG_ENDIAN__) && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
-#define JAEGER_IS_LITTLE_ENDIAN 0
-#elif defined(_WIN32)
-#define JAEGER_IS_LITTLE_ENDIAN 1
-#else
-#error "Endian detection needs to be set up for your compiler"
-#endif
+uint16_t toBigEndian(uint16_t value) {
+    return htobe16(value);
+}
 
-#if JAEGER_IS_LITTLE_ENDIAN == 1
-#if defined(__clang__) || (defined(__GNUC__) && ((__GNUC__ == 4 && __GNUC_MINOR__ >= 8) || __GNUC__ >= 5))
-inline uint64_t otel_bswap_64(uint64_t host_int) {
-    return __builtin_bswap64(host_int);
+uint32_t toBigEndian(uint32_t value) {
+    return htobe32(value);
 }
-#elif defined(_MSC_VER)
-inline uint64_t otel_bswap_64(uint64_t host_int) {
-    return _byteswap_uint64(host_int);
+
+uint64_t toBigEndian(uint64_t value) {
+    return htobe64(value);
 }
-#else
-#error "Port need to support endianess conversion"
-#endif
-#endif
+
+uint16_t fromBigEndian(uint16_t value) {
+    return be16toh(value);
+}
+
+uint32_t fromBigEndian(uint32_t value) {
+    return be32toh(value);
+}
+
+uint64_t fromBigEndian(uint64_t value) {
+    return be64toh(value);
+}
 
 } // namespace endian
 
@@ -85,13 +87,13 @@ void Inject(const trace::SpanContext &ctx, context::propagation::TextMapCarrier 
     memset(buffer, 0, kBinCtxLen);
 
     // trace id
-    auto high = endian::otel_bswap_64(*(uint64_t *)ctx.trace_id().Id().data());
-    auto low = endian::otel_bswap_64(*(uint64_t *)(ctx.trace_id().Id().data() + kTraceLen / 2u));
+    auto high = endian::toBigEndian(*(uint64_t *)ctx.trace_id().Id().data());
+    auto low = endian::toBigEndian(*(uint64_t *)(ctx.trace_id().Id().data() + kTraceLen / 2u));
     *(uint64_t *)buffer = high;
     *(uint64_t *)(buffer + kTraceLen / 2u) = low;
 
     // span id
-    auto span = endian::otel_bswap_64(*(uint64_t *)ctx.span_id().Id().data());
+    auto span = endian::toBigEndian(*(uint64_t *)ctx.span_id().Id().data());
     *(uint64_t *)(buffer + kTraceLen) = span;
 
     // parent span id: unnecessary
@@ -112,17 +114,17 @@ void Inject(const trace::SpanContext &ctx, context::propagation::TextMapCarrier 
     unsigned char size[kSizeLen];
     ctx.trace_state()->GetAllEntries([&](nostd::string_view key, nostd::string_view val) noexcept -> bool {
         // memset(size, 0, kSizeLen);
-        *((uint32_t *)size) = (uint32_t)key.size();
+        *((uint32_t *)size) = endian::toBigEndian((uint32_t)key.size());
         content << string((char *)size, kSizeLen) << string(key.data(), key.size());
         // memset(size, 0, kSizeLen);
-        *((uint32_t *)size) = (uint32_t)val.size();
+        *((uint32_t *)size) = endian::toBigEndian((uint32_t)val.size());
         content << string((char *)size, kSizeLen) << string(val.data(), val.size());
         ++num;
         return true;
     });
 
     // DO NOT forget to correct baggage number
-    *((uint32_t *)(&buffer[kTraceLen + kSpanLen * 2u + kFlagLen])) = num;
+    *((uint32_t *)(&buffer[kTraceLen + kSpanLen * 2u + kFlagLen])) = endian::toBigEndian(num);
 
     // construct trace context all-in-one
     stringstream context;
@@ -141,19 +143,19 @@ trace::SpanContext Extract(const context::propagation::TextMapCarrier &car) {
     }
 
     // trace id
-    auto high = endian::otel_bswap_64(*(uint64_t *)context.data());
-    auto low = endian::otel_bswap_64(*(uint64_t *)(context.data() + kTraceLen / 2u));
+    auto high = endian::fromBigEndian(*(uint64_t *)context.data());
+    auto low = endian::fromBigEndian(*(uint64_t *)(context.data() + kTraceLen / 2u));
     *(uint64_t *)context.data() = high;
     *(uint64_t *)(context.data() + kTraceLen / 2u) = low;
     trace::TraceId traceId({(uint8_t *)context.data(), kTraceLen});
 
     // span id
-    auto span = endian::otel_bswap_64(*(uint64_t *)(context.data() + kTraceLen));
+    auto span = endian::fromBigEndian(*(uint64_t *)(context.data() + kTraceLen));
     *(uint64_t *)(context.data() + kTraceLen) = span;
     trace::SpanId spanId({(uint8_t *)(context.data() + kTraceLen), kSpanLen});
 
     // parend span id: unnecessary
-    // auto parent = endian::otel_bswap_64(*(uint64_t *)(context.data() + kTraceLen + kSpanLen));
+    // auto parent = endian::fromBigEndian(*(uint64_t *)(context.data() + kTraceLen + kSpanLen));
     // *(uint64_t *)(context.data() + kTraceLen + kSpanLen) = parent;
     // trace::SpanId parentId({(uint8_t *)(context.data() + kTraceLen + kSpanLen), kSpanLen});
 
@@ -163,7 +165,7 @@ trace::SpanContext Extract(const context::propagation::TextMapCarrier &car) {
     // get number of baggage which is well-known as trace-state
     unsigned char size[kSizeLen];
     memcpy(size, context.data() + kTraceLen + kSpanLen * 2u + kFlagLen, kSizeLen);
-    auto baggage = *((uint32_t *)size);
+    auto baggage = endian::fromBigEndian(*((uint32_t *)size));
 
     // fast return
     if (baggage == 0u) {
@@ -178,7 +180,7 @@ trace::SpanContext Extract(const context::propagation::TextMapCarrier &car) {
         if (offset + kSizeLen > context.size()) {
             return trace::SpanContext::GetInvalid();
         }
-        auto keySize = *(uint32_t *)nostd::string_view(context.data() + offset, kSizeLen).data();
+        auto keySize = endian::fromBigEndian(*(uint32_t *)nostd::string_view(context.data() + offset, kSizeLen).data());
         offset += kSizeLen;
         if (offset + keySize > context.size()) {
             return trace::SpanContext::GetInvalid();
@@ -189,7 +191,8 @@ trace::SpanContext Extract(const context::propagation::TextMapCarrier &car) {
         if (offset + kSizeLen > context.size()) {
             return trace::SpanContext::GetInvalid();
         }
-        auto valSize = *(uint32_t *)(nostd::string_view(context.data() + offset, kSizeLen).data());
+        auto valSize =
+            endian::fromBigEndian(*(uint32_t *)(nostd::string_view(context.data() + offset, kSizeLen).data()));
         offset += kSizeLen;
         if (offset + valSize > context.size()) {
             return trace::SpanContext::GetInvalid();
@@ -254,17 +257,17 @@ Context::Context(const string &context)
     }
 
     trace::TraceId traceId({(uint8_t *)context.data(), kTraceLen});
-    auto high = endian::otel_bswap_64(*(uint64_t *)traceId.Id().data());
-    auto low = endian::otel_bswap_64(*(uint64_t *)(traceId.Id().data() + kTraceLen / 2u));
+    auto high = endian::fromBigEndian(*(uint64_t *)traceId.Id().data());
+    auto low = endian::fromBigEndian(*(uint64_t *)(traceId.Id().data() + kTraceLen / 2u));
     *(uint64_t *)traceId.Id().data() = high;
     *(uint64_t *)(traceId.Id().data() + kTraceLen / 2u) = low;
 
     trace::SpanId spanId({(uint8_t *)(context.data() + kTraceLen), kSpanLen});
-    auto span = endian::otel_bswap_64(*(uint64_t *)spanId.Id().data());
+    auto span = endian::fromBigEndian(*(uint64_t *)spanId.Id().data());
     *(uint64_t *)spanId.Id().data() = span;
 
     // trace::SpanId parendId({(uint8_t *)(context.data() + kTraceLen + kSpanLen), kSpanLen});
-    // auto parent = endian::otel_bswap_64(*(uint64_t *)parendId.Id().data());
+    // auto parent = endian::fromBigEndian(*(uint64_t *)parendId.Id().data());
     // *(uint64_t *)parendId.Id().data() = parent;
 
     trace::TraceFlags flag{*((uint8_t *)(context.data() + kTraceLen + kSpanLen * 2u))};
@@ -290,7 +293,7 @@ Context::Context(const string &context)
 
     unsigned char size[kSizeLen];
     memcpy(size, context.data() + kTraceLen + kSpanLen * 2u + kFlagLen, kSizeLen);
-    auto baggage = *((uint32_t *)size);
+    auto baggage = endian::fromBigEndian(*((uint32_t *)size));
     if (baggage == 0) {
         return;
     }
@@ -300,7 +303,7 @@ Context::Context(const string &context)
         if (offset + kSizeLen > context.size()) {
             return;
         }
-        auto keySize = *(uint32_t *)nostd::string_view(context.data() + offset, kSizeLen).data();
+        auto keySize = endian::fromBigEndian(*(uint32_t *)nostd::string_view(context.data() + offset, kSizeLen).data());
         offset += kSizeLen;
         if (offset + keySize > context.size()) {
             return;
@@ -310,7 +313,7 @@ Context::Context(const string &context)
         if (offset + kSizeLen > context.size()) {
             return;
         }
-        auto valSize = *(uint32_t *)(nostd::string_view(context.data() + offset, kSizeLen).data());
+        auto valSize = endian::fromBigEndian(*(uint32_t *)(nostd::string_view(context.data() + offset, kSizeLen).data()));
         offset += kSizeLen;
         if (offset + valSize > context.size()) {
             return;
