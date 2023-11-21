@@ -12,8 +12,8 @@ using SpanKind = opentelemetry::trace::SpanKind;
 struct Scope {
 public:
     Scope();
-    Scope(opentelemetry::nostd::shared_ptr<opentelemetry::trace::Span> &&span,
-          std::unique_ptr<opentelemetry::context::Token> &&token);
+    Scope(opentelemetry::nostd::shared_ptr<opentelemetry::trace::Span> span,
+          std::unique_ptr<opentelemetry::context::Token> token);
     ~Scope();
 
     Scope(const Scope &) = delete;
@@ -34,7 +34,7 @@ private:
 struct IsolatedScope {
 public:
     IsolatedScope();
-    IsolatedScope(std::string &&ctx, opentelemetry::nostd::shared_ptr<opentelemetry::trace::Span> &&span);
+    IsolatedScope(std::string ctx, opentelemetry::nostd::shared_ptr<opentelemetry::trace::Span> span);
     ~IsolatedScope();
 
     IsolatedScope(const IsolatedScope &) = delete;
@@ -85,7 +85,7 @@ public:
                     unsigned cmd = 0,            // command id
                     bool root = false) noexcept; // root of trace
     // EndSpan: end span with the given scope (from StartSpan())
-    void EndSpan(Scope &&context, int err = 0, opentelemetry::nostd::string_view msg = "") noexcept;
+    void EndSpan(Scope context, int err = 0, opentelemetry::nostd::string_view msg = "") noexcept;
 
 public:
     // StartIsolatedSpan: create a new span without setting "active"
@@ -97,7 +97,7 @@ public:
                                     unsigned cmd = 0,            // command id
                                     bool root = false) noexcept; // root of trace
     // EndIsolatedSpan: end span with the given scope (from StartIsolatedSpan())
-    void EndIsolatedSpan(IsolatedScope &&context, int err = 0, opentelemetry::nostd::string_view msg = "") noexcept;
+    void EndIsolatedSpan(IsolatedScope context, int err = 0, opentelemetry::nostd::string_view msg = "") noexcept;
 
 public:
     // GetPlainTextContext: get current active context(plaintext format)

@@ -56,7 +56,7 @@ Scope::Scope()
     : _span(nullptr)
     , _token(nullptr) {}
 
-Scope::Scope(nostd::shared_ptr<trace::Span> &&span, unique_ptr<context::Token> &&token)
+Scope::Scope(nostd::shared_ptr<trace::Span> span, unique_ptr<context::Token> token)
     : _span(move(span))
     , _token(move(token)) {}
 
@@ -84,7 +84,7 @@ IsolatedScope::IsolatedScope()
     : _ctx()
     , _span(nullptr) {}
 
-IsolatedScope::IsolatedScope(string &&ctx, nostd::shared_ptr<trace::Span> &&span)
+IsolatedScope::IsolatedScope(string ctx, nostd::shared_ptr<trace::Span> span)
     : _ctx(move(ctx))
     , _span(move(span)) {}
 
@@ -271,7 +271,7 @@ Scope Tracing::StartSpan(const string &context, const string &proc, const string
     return Scope{move(span), move(token)};
 }
 
-void Tracing::EndSpan(Scope &&context, int err, opentelemetry::nostd::string_view msg) noexcept {
+void Tracing::EndSpan(Scope context, int err, opentelemetry::nostd::string_view msg) noexcept {
     if (context._span != nullptr && context._token != nullptr) {
         context._span->SetAttribute(kTraceTagErr, err);
         context._span->SetStatus(err == 0 ? trace::StatusCode::kOk : trace::StatusCode::kError, msg);
@@ -337,7 +337,7 @@ IsolatedScope Tracing::StartIsolatedSpan(const string &context, const string &pr
     return IsolatedScope{string(tc.data(), tc.size()), move(span)};
 }
 
-void Tracing::EndIsolatedSpan(IsolatedScope &&context, int err, opentelemetry::nostd::string_view msg) noexcept {
+void Tracing::EndIsolatedSpan(IsolatedScope context, int err, opentelemetry::nostd::string_view msg) noexcept {
     if (context._span != nullptr) {
         context._span->SetAttribute(kTraceTagErr, err);
         context._span->SetStatus(err == 0 ? trace::StatusCode::kOk : trace::StatusCode::kError, msg);
