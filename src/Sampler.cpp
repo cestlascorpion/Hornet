@@ -1,13 +1,14 @@
 #include "Sampler.h"
-#include "Common.h"
 
+#include <sys/stat.h>
+#include <unistd.h>
 #include <yaml-cpp/yaml.h>
 
 #include <atomic>
 #include <random>
 #include <set>
-#include <sys/stat.h>
-#include <unistd.h>
+
+#include "Common.h"
 
 using namespace std;
 using namespace opentelemetry;

@@ -1,4 +1,5 @@
 #include "LogHandler.h"
+
 #include "Common.h"
 
 using namespace opentelemetry;
@@ -6,8 +7,7 @@ using namespace opentelemetry;
 namespace tracing {
 
 void CustomLogHandler::Handle(sdk::common::internal_log::LogLevel level, const char *file, int line, const char *msg,
-                        const sdk::common::AttributeMap &attributes) noexcept
-{
+                              const sdk::common::AttributeMap &attributes) noexcept {
     std::stringstream output_s;
     output_s << "[" << sdk::common::internal_log::LevelToString(level) << "] ";
     if (file != nullptr) {

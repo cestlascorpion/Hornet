@@ -1,10 +1,11 @@
 #include "Tracing.h"
+
+#include <opentelemetry/context/propagation/global_propagator.h>
+
 #include "Common.h"
 #include "LogHandler.h"
 #include "Propagator.h"
 #include "Sampler.h"
-
-#include <opentelemetry/context/propagation/global_propagator.h>
 #ifdef JAEGER_EXPORTER
 #include <opentelemetry/exporters/jaeger/jaeger_exporter.h>
 #else
@@ -19,10 +20,8 @@
 #include <opentelemetry/sdk/trace/samplers/parent.h>
 #include <opentelemetry/sdk/trace/tracer_provider.h>
 #include <opentelemetry/trace/provider.h>
-
-#include <yaml-cpp/yaml.h>
-
 #include <unistd.h>
+#include <yaml-cpp/yaml.h>
 
 using namespace std;
 using namespace opentelemetry;

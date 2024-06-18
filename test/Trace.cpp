@@ -1,20 +1,21 @@
-#include "Tracing.h"
-
 #include <chrono>
 #include <iostream>
 #include <thread>
+
+#include "Tracing.h"
 
 using namespace std;
 using namespace tracing;
 using namespace opentelemetry;
 
-constexpr const char *hexParentContext = "FEA80376EE0C6F9F"
-                                         "EC9C673F09F6EAE1" // 9f6f0cee7603a8fee1eaf6093f679cec
-                                         "9E5304AE5F1682BB" // bb82165fae04539e
-                                         "0000000000000000" // 000000000
-                                         "01000000"         // true
-                                         "01000000"
-                                         "0870796A5F746573740000000B68656C6C6F20776F726C64";
+constexpr const char *hexParentContext =
+    "FEA80376EE0C6F9F"
+    "EC9C673F09F6EAE1" // 9f6f0cee7603a8fee1eaf6093f679cec
+    "9E5304AE5F1682BB" // bb82165fae04539e
+    "0000000000000000" // 000000000
+    "01000000"         // true
+    "01000000"
+    "0870796A5F746573740000000B68656C6C6F20776F726C64";
 
 constexpr const unsigned cmd = 10u;
 constexpr const unsigned uid = 12345678u;

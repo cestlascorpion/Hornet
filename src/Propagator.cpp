@@ -1,11 +1,11 @@
 #include "Propagator.h"
-#include "Common.h"
-#include "Tracing.h"
 
 #include <endian.h>
-
 #include <opentelemetry/context/propagation/global_propagator.h>
 #include <opentelemetry/trace/context.h>
+
+#include "Common.h"
+#include "Tracing.h"
 
 using namespace std;
 using namespace opentelemetry;
@@ -313,7 +313,8 @@ Context::Context(const string &context)
         if (offset + kSizeLen > context.size()) {
             return;
         }
-        auto valSize = endian::fromBigEndian(*(uint32_t *)(nostd::string_view(context.data() + offset, kSizeLen).data()));
+        auto valSize =
+            endian::fromBigEndian(*(uint32_t *)(nostd::string_view(context.data() + offset, kSizeLen).data()));
         offset += kSizeLen;
         if (offset + valSize > context.size()) {
             return;
