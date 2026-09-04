@@ -49,7 +49,7 @@ const string &GetProcName() {
 
 } // namespace detail
 
-namespace tracing {
+namespace Tracing {
 
 Scope::Scope()
     : _span(nullptr)
@@ -278,6 +278,8 @@ void Tracing::EndSpan(Scope context, int err, opentelemetry::nostd::string_view 
             // TODO
         }
         context._span->End();
+        context::RuntimeContext::Detach(*context._token);
+        context._token.reset();
     }
 }
 
@@ -323,9 +325,8 @@ IsolatedScope Tracing::StartIsolatedSpan(const string &context, const string &pr
     }
     auto name = op.str(); // proc.func name
     auto span = tr->StartSpan(name.c_str(), extra, spOpts);
-    auto token = context::RuntimeContext::Attach(context::RuntimeContext::GetCurrent().SetValue(trace::kSpanKey, span));
     auto pr = context::propagation::GlobalTextMapPropagator::GetGlobalPropagator();
-    auto ctx = context::RuntimeContext::GetCurrent();
+    auto ctx = context::RuntimeContext::GetCurrent().SetValue(trace::kSpanKey, span);
     CustomCarrier carrier;
     pr->Inject(carrier, ctx);
 
@@ -347,4 +348,4 @@ void Tracing::EndIsolatedSpan(IsolatedScope context, int err, opentelemetry::nos
     }
 }
 
-} // namespace tracing
+} // namespace Tracing

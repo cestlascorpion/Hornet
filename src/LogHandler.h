@@ -2,7 +2,7 @@
 
 #include <opentelemetry/sdk/common/global_log_handler.h>
 
-namespace tracing {
+namespace Tracing {
 
 class CustomLogHandler : public opentelemetry::sdk::common::internal_log::LogHandler {
 public:
@@ -10,4 +10,4 @@ public:
                 const opentelemetry::sdk::common::AttributeMap &attributes) noexcept override;
 };
 
-} // namespace tracing
+} // namespace Tracing

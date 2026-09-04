@@ -5,7 +5,7 @@
 
 #include <map>
 
-namespace tracing {
+namespace Tracing {
 
 using SpanKind = opentelemetry::trace::SpanKind;
 
@@ -117,4 +117,4 @@ private:
     std::unique_ptr<TraceConf> _conf;
 };
 
-} // namespace tracing
+} // namespace Tracing

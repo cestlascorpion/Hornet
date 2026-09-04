@@ -2,7 +2,7 @@
 
 #include <opentelemetry/sdk/trace/sampler.h>
 
-namespace tracing {
+namespace Tracing {
 
 // TLDR: just a alias
 using SampleResult = opentelemetry::sdk::trace::SamplingResult;
@@ -27,4 +27,4 @@ private:
     const std::string _desc;
 };
 
-} // namespace tracing
+} // namespace Tracing

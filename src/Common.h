@@ -7,7 +7,7 @@
 // #define JAEGER_EXPORTER
 #define ZIPKIN_EXPORTER
 
-namespace tracing {
+namespace Tracing {
 
 namespace jaeger {
 
@@ -32,9 +32,9 @@ constexpr unsigned kMaxInterval = 60 * 5;    // 5 min 内必须采样一次
 constexpr const char *k_DefaultPathEnv = "TRACING_CTRL_CONF";  // 配置文件环境变量
 constexpr const char *k_DefaultPath = "/etc/conf/tracing.yml"; // 配置文件默认地址
 
-} // namespace tracing
+} // namespace Tracing
 
-namespace tracing {
+namespace Tracing {
 
 inline std::string FormatTraceId(const opentelemetry::trace::TraceId &trace) noexcept {
     char buffer[2 * opentelemetry::trace::TraceId::kSize];
@@ -48,4 +48,4 @@ inline std::string FormatSpanId(const opentelemetry::trace::SpanId &span) noexce
     return {buffer, sizeof(buffer)};
 }
 
-} // namespace tracing
+} // namespace Tracing

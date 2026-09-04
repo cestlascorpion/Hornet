@@ -19,7 +19,7 @@ namespace detail {
 unsigned long int GetRandom() {
     static random_device r;
     static default_random_engine e(r());
-    return e() % tracing::kMaxRatioValue;
+    return e() % Tracing::kMaxRatioValue;
 }
 
 // Format std::set<T> to std::string
@@ -36,7 +36,7 @@ class SampleConf final {
 public:
     SampleConf()
         : _path()
-        , _ratio(tracing::kMaxRatioValue)
+        , _ratio(Tracing::kMaxRatioValue)
         , _cmdList()
         , _idx(0)
         , _uidList() {
@@ -44,9 +44,9 @@ public:
             item.store(0, std::memory_order_relaxed);
         }
 
-        const char *path = getenv(tracing::k_DefaultPathEnv);
+        const char *path = getenv(Tracing::k_DefaultPathEnv);
         if (path == nullptr || strlen(path) == 0) {
-            _path = tracing::k_DefaultPath;
+            _path = Tracing::k_DefaultPath;
         } else {
             _path = path;
         }
@@ -90,7 +90,7 @@ public:
         if (ratio == 0) {
             return false;
         }
-        if (ratio == tracing::kMaxRatioValue) {
+        if (ratio == Tracing::kMaxRatioValue) {
             return true;
         }
 
@@ -98,7 +98,7 @@ public:
 
         // hit the white-list
         if (uid > 0 && cur.count(uid) != 0) {
-            if (cmd > 0 && cmd < tracing::kMaxCmdValue) {
+            if (cmd > 0 && cmd < Tracing::kMaxCmdValue) {
                 _cmdList[cmd].store(now, memory_order_relaxed);
             }
             return true;
@@ -107,16 +107,16 @@ public:
         // decide by the ratio
         auto r = GetRandom();
         if (r < ratio) {
-            if (cmd > 0 && cmd < tracing::kMaxCmdValue) {
+            if (cmd > 0 && cmd < Tracing::kMaxCmdValue) {
                 _cmdList[cmd] = now;
             }
             return true;
         }
 
         // sample one every kMaxInterval(5min) at least
-        if (cmd > 0 && cmd < tracing::kMaxCmdValue) {
+        if (cmd > 0 && cmd < Tracing::kMaxCmdValue) {
             auto last = _cmdList[cmd].load(memory_order_relaxed);
-            if (now > last + tracing::kMaxInterval) {
+            if (now > last + Tracing::kMaxInterval) {
                 _cmdList[cmd].compare_exchange_weak(last, now, memory_order_relaxed);
                 return true;
             }
@@ -143,8 +143,8 @@ private:
         auto ratio = sampler["ratio"];
         if (!ratio.IsNull() && ratio.IsScalar()) {
             r = ratio.as<unsigned int>();
-            if (r > tracing::kMaxRatioValue) {
-                r = tracing::kMaxRatioValue;
+            if (r > Tracing::kMaxRatioValue) {
+                r = Tracing::kMaxRatioValue;
             }
         }
         auto whiteList = sampler["white-list"];
@@ -159,7 +159,7 @@ private:
 private:
     const char *_path;
     atomic<unsigned> _ratio;
-    array<atomic<long>, tracing::kMaxCmdValue> _cmdList;
+    array<atomic<long>, Tracing::kMaxCmdValue> _cmdList;
     atomic<unsigned> _idx;
     array<set<unsigned>, 2u> _uidList;
 };
@@ -171,7 +171,7 @@ SampleConf *GetControlConfig() {
 
 } // namespace detail
 
-namespace tracing {
+namespace Tracing {
 
 CustomSampler::CustomSampler() noexcept
     : _desc("CustomSampler{conf-based sampler}") {}
@@ -208,4 +208,4 @@ nostd::string_view CustomSampler::GetDescription() const noexcept {
     return _desc;
 }
 
-} // namespace tracing
+} // namespace Tracing

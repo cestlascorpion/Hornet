@@ -1,8 +1,11 @@
 #include "Propagator.h"
 
-#include <endian.h>
 #include <opentelemetry/context/propagation/global_propagator.h>
 #include <opentelemetry/trace/context.h>
+
+#include <array>
+#include <cstdint>
+#include <cstring>
 
 #include "Common.h"
 #include "Tracing.h"
@@ -28,42 +31,29 @@ constexpr int8_t kHexDigits[256] = {
     -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
 };
 
-namespace endian {
-
-uint16_t toBigEndian(uint16_t value) {
-    return htobe16(value);
-}
-
-uint32_t toBigEndian(uint32_t value) {
-    return htobe32(value);
-}
-
-uint64_t toBigEndian(uint64_t value) {
-    return htobe64(value);
-}
-
-uint16_t fromBigEndian(uint16_t value) {
-    return be16toh(value);
-}
-
-uint32_t fromBigEndian(uint32_t value) {
-    return be32toh(value);
-}
-
-uint64_t fromBigEndian(uint64_t value) {
-    return be64toh(value);
-}
-
-} // namespace endian
-
 namespace detail {
 
-unsigned char HexToInt(char c) {
-    return (unsigned char)kHexDigits[uint8_t(c)];
+uint32_t ReadU32(const char *data) {
+    return (uint32_t(uint8_t(data[0])) << 24u) | (uint32_t(uint8_t(data[1])) << 16u) |
+           (uint32_t(uint8_t(data[2])) << 8u) | uint32_t(uint8_t(data[3]));
+}
+
+void AppendU32(string &data, uint32_t value) {
+    data.push_back(char((value >> 24u) & 0xffu));
+    data.push_back(char((value >> 16u) & 0xffu));
+    data.push_back(char((value >> 8u) & 0xffu));
+    data.push_back(char(value & 0xffu));
+}
+
+int HexToInt(char c) {
+    return kHexDigits[uint8_t(c)];
 }
 
 bool HexToBinary(const string &hex, uint8_t *buffer, size_t buffer_size) {
     memset(buffer, 0, buffer_size);
+    if (hex.empty()) {
+        return true;
+    }
     if (hex.size() > buffer_size * 2) {
         return false;
     }
@@ -72,10 +62,19 @@ bool HexToBinary(const string &hex, uint8_t *buffer, size_t buffer_size) {
     auto last_hex_pos = hex_size - 1;
     auto i = 0u;
     for (; i < last_hex_pos; i += 2) {
-        buffer[buffer_pos++] = static_cast<uint8_t>((HexToInt(hex[i]) << 4) | HexToInt(hex[i + 1]));
+        auto high = HexToInt(hex[i]);
+        auto low = HexToInt(hex[i + 1]);
+        if (high < 0 || low < 0) {
+            return false;
+        }
+        buffer[buffer_pos++] = static_cast<uint8_t>((high << 4) | low);
     }
     if (i == last_hex_pos) {
-        buffer[buffer_pos] = HexToInt(hex[i]);
+        auto value = HexToInt(hex[i]);
+        if (value < 0) {
+            return false;
+        }
+        buffer[buffer_pos] = static_cast<uint8_t>(value);
     }
     return true;
 }
@@ -83,89 +82,74 @@ bool HexToBinary(const string &hex, uint8_t *buffer, size_t buffer_size) {
 // Inject: context -> carrier
 void Inject(const trace::SpanContext &ctx, context::propagation::TextMapCarrier &car) {
     // prepare buffer for trace-id span-id parent-span-id sample-flag baggage-number <- attention
-    unsigned char buffer[kBinCtxLen];
-    memset(buffer, 0, kBinCtxLen);
+    array<uint8_t, kBinCtxLen> buffer{};
 
     // trace id
-    auto high = endian::toBigEndian(*(uint64_t *)ctx.trace_id().Id().data());
-    auto low = endian::toBigEndian(*(uint64_t *)(ctx.trace_id().Id().data() + kTraceLen / 2u));
-    *(uint64_t *)buffer = high;
-    *(uint64_t *)(buffer + kTraceLen / 2u) = low;
+    memcpy(buffer.data(), ctx.trace_id().Id().data(), kTraceLen);
 
     // span id
-    auto span = endian::toBigEndian(*(uint64_t *)ctx.span_id().Id().data());
-    *(uint64_t *)(buffer + kTraceLen) = span;
-
-    // parent span id: unnecessary
-    // *(uint64_t *)(buffer + kTraceLen + kSpanLen) = 0;
+    memcpy(buffer.data() + kTraceLen, ctx.span_id().Id().data(), kSpanLen);
 
     // flag
-    buffer[kTraceLen + kSpanLen * 2u] = ctx.trace_flags().IsSampled() ? '1' : '0';
+    buffer[kTraceLen + kSpanLen * 2u] = ctx.trace_flags().IsSampled() ? 1u : 0u;
 
     // fast return
     if (ctx.trace_state()->Empty()) {
-        car.Set(tracing::jaeger::kBinaryFormat, nostd::string_view((char *)buffer, kBinCtxLen));
+        car.Set(Tracing::jaeger::kBinaryFormat,
+                nostd::string_view(reinterpret_cast<const char *>(buffer.data()), buffer.size()));
         return;
     }
 
     // get all baggage into content, NOT SPECIFIED BY THE SPEC!
     stringstream content;
     uint32_t num = 0u;
-    unsigned char size[kSizeLen];
     ctx.trace_state()->GetAllEntries([&](nostd::string_view key, nostd::string_view val) noexcept -> bool {
-        // memset(size, 0, kSizeLen);
-        *((uint32_t *)size) = endian::toBigEndian((uint32_t)key.size());
-        content << string((char *)size, kSizeLen) << string(key.data(), key.size());
-        // memset(size, 0, kSizeLen);
-        *((uint32_t *)size) = endian::toBigEndian((uint32_t)val.size());
-        content << string((char *)size, kSizeLen) << string(val.data(), val.size());
+        auto keySize = static_cast<uint32_t>(key.size());
+        auto valSize = static_cast<uint32_t>(val.size());
+        string data;
+        AppendU32(data, keySize);
+        content << data << string(key.data(), key.size());
+        data.clear();
+        AppendU32(data, valSize);
+        content << data << string(val.data(), val.size());
         ++num;
         return true;
     });
 
     // DO NOT forget to correct baggage number
-    *((uint32_t *)(&buffer[kTraceLen + kSpanLen * 2u + kFlagLen])) = endian::toBigEndian(num);
+    auto header = string(reinterpret_cast<const char *>(buffer.data()), buffer.size());
+    header.resize(kTraceLen + kSpanLen * 2u + kFlagLen);
+    AppendU32(header, num);
 
     // construct trace context all-in-one
     stringstream context;
-    context << string((char *)buffer, kBinCtxLen) << content.str();
-    car.Set(tracing::jaeger::kBinaryFormat, context.str());
+    context << header << content.str();
+    car.Set(Tracing::jaeger::kBinaryFormat, context.str());
 }
 
 // Extract: carrier -> context
 trace::SpanContext Extract(const context::propagation::TextMapCarrier &car) {
     // get jaeger trace context all-in-one
-    auto context = car.Get(tracing::jaeger::kBinaryFormat);
+    auto context = car.Get(Tracing::jaeger::kBinaryFormat);
 
     // fast return
     if (context.empty() || context.size() < kBinCtxLen) {
         return trace::SpanContext::GetInvalid();
     }
 
-    // trace id
-    auto high = endian::fromBigEndian(*(uint64_t *)context.data());
-    auto low = endian::fromBigEndian(*(uint64_t *)(context.data() + kTraceLen / 2u));
-    *(uint64_t *)context.data() = high;
-    *(uint64_t *)(context.data() + kTraceLen / 2u) = low;
-    trace::TraceId traceId({(uint8_t *)context.data(), kTraceLen});
+    array<uint8_t, kTraceLen> trace{};
+    memcpy(trace.data(), context.data(), trace.size());
+    trace::TraceId traceId({trace.data(), trace.size()});
 
-    // span id
-    auto span = endian::fromBigEndian(*(uint64_t *)(context.data() + kTraceLen));
-    *(uint64_t *)(context.data() + kTraceLen) = span;
-    trace::SpanId spanId({(uint8_t *)(context.data() + kTraceLen), kSpanLen});
-
-    // parend span id: unnecessary
-    // auto parent = endian::fromBigEndian(*(uint64_t *)(context.data() + kTraceLen + kSpanLen));
-    // *(uint64_t *)(context.data() + kTraceLen + kSpanLen) = parent;
-    // trace::SpanId parentId({(uint8_t *)(context.data() + kTraceLen + kSpanLen), kSpanLen});
+    array<uint8_t, kSpanLen> span{};
+    memcpy(span.data(), context.data() + kTraceLen, span.size());
+    trace::SpanId spanId({span.data(), span.size()});
 
     // flag
-    trace::TraceFlags flag{*((uint8_t *)(context.data() + kTraceLen + kSpanLen * 2u))};
+    trace::TraceFlags flag{uint8_t(context[kTraceLen + kSpanLen * 2u])};
 
     // get number of baggage which is well-known as trace-state
-    unsigned char size[kSizeLen];
-    memcpy(size, context.data() + kTraceLen + kSpanLen * 2u + kFlagLen, kSizeLen);
-    auto baggage = endian::fromBigEndian(*((uint32_t *)size));
+    auto baggage = ReadU32(context.data() + kTraceLen + kSpanLen * 2u + kFlagLen);
 
     // fast return
     if (baggage == 0u) {
@@ -177,24 +161,23 @@ trace::SpanContext Extract(const context::propagation::TextMapCarrier &car) {
     size_t offset = kBinCtxLen;
     for (auto i = 0u; i < baggage; i++) {
         // get the key
-        if (offset + kSizeLen > context.size()) {
+        if (offset > context.size() || kSizeLen > context.size() - offset) {
             return trace::SpanContext::GetInvalid();
         }
-        auto keySize = endian::fromBigEndian(*(uint32_t *)nostd::string_view(context.data() + offset, kSizeLen).data());
+        auto keySize = ReadU32(context.data() + offset);
         offset += kSizeLen;
-        if (offset + keySize > context.size()) {
+        if (offset > context.size() || keySize > context.size() - offset) {
             return trace::SpanContext::GetInvalid();
         }
         auto key = string(context.data() + offset, keySize);
         offset += keySize;
         // get the value
-        if (offset + kSizeLen > context.size()) {
+        if (offset > context.size() || kSizeLen > context.size() - offset) {
             return trace::SpanContext::GetInvalid();
         }
-        auto valSize =
-            endian::fromBigEndian(*(uint32_t *)(nostd::string_view(context.data() + offset, kSizeLen).data()));
+        auto valSize = ReadU32(context.data() + offset);
         offset += kSizeLen;
-        if (offset + valSize > context.size()) {
+        if (offset > context.size() || valSize > context.size() - offset) {
             return trace::SpanContext::GetInvalid();
         }
         auto val = string(context.data() + offset, valSize);
@@ -209,7 +192,7 @@ trace::SpanContext Extract(const context::propagation::TextMapCarrier &car) {
 
 } // namespace detail
 
-namespace tracing {
+namespace Tracing {
 
 nostd::string_view CustomCarrier::Get(nostd::string_view key) const noexcept {
     auto it = _headers.find(key);
@@ -242,35 +225,29 @@ bool CustomPropagator::Fields(nostd::function_ref<bool(nostd::string_view)> call
     return callback(jaeger::kBinaryFormat);
 }
 
-} // namespace tracing
+} // namespace Tracing
 
-namespace tracing {
+namespace Tracing {
 
 Context::Context(const string &context)
-    : _traceId("000000000000000000")
-    , _spanId("000000000")
-    , _parentSpanId("000000000")
+    : _traceId("00000000000000000000000000000000")
+    , _spanId("0000000000000000")
+    , _parentSpanId("0000000000000000")
     , _sampled(false)
     , _baggage() {
     if (context.empty() || context.size() < kBinCtxLen) {
         return;
     }
 
-    trace::TraceId traceId({(uint8_t *)context.data(), kTraceLen});
-    auto high = endian::fromBigEndian(*(uint64_t *)traceId.Id().data());
-    auto low = endian::fromBigEndian(*(uint64_t *)(traceId.Id().data() + kTraceLen / 2u));
-    *(uint64_t *)traceId.Id().data() = high;
-    *(uint64_t *)(traceId.Id().data() + kTraceLen / 2u) = low;
+    array<uint8_t, kTraceLen> trace{};
+    memcpy(trace.data(), context.data(), trace.size());
+    trace::TraceId traceId({trace.data(), trace.size()});
 
-    trace::SpanId spanId({(uint8_t *)(context.data() + kTraceLen), kSpanLen});
-    auto span = endian::fromBigEndian(*(uint64_t *)spanId.Id().data());
-    *(uint64_t *)spanId.Id().data() = span;
+    array<uint8_t, kSpanLen> span{};
+    memcpy(span.data(), context.data() + kTraceLen, span.size());
+    trace::SpanId spanId({span.data(), span.size()});
 
-    // trace::SpanId parendId({(uint8_t *)(context.data() + kTraceLen + kSpanLen), kSpanLen});
-    // auto parent = endian::fromBigEndian(*(uint64_t *)parendId.Id().data());
-    // *(uint64_t *)parendId.Id().data() = parent;
-
-    trace::TraceFlags flag{*((uint8_t *)(context.data() + kTraceLen + kSpanLen * 2u))};
+    trace::TraceFlags flag{uint8_t(context[kTraceLen + kSpanLen * 2u])};
 
     constexpr const size_t length = kTraceLen * 2u + kSpanLen * 2u + kSpanLen * 2u;
     char buffer[length];
@@ -278,7 +255,6 @@ Context::Context(const string &context)
 
     traceId.ToLowerBase16(nostd::span<char, kTraceLen * 2u>{&buffer[0], kTraceLen * 2u});
     spanId.ToLowerBase16(nostd::span<char, kSpanLen * 2u>{&buffer[kTraceLen * 2u], kSpanLen * 2u});
-    // parendId.ToLowerBase16(nostd::span<char, kSpanLen * 2u>{&buffer[kTraceLen * 2u + kSpanLen * 2u], kSpanLen * 2u});
 
     if (traceId.IsValid()) {
         _traceId = string(&buffer[0], kTraceLen * 2u);
@@ -286,37 +262,31 @@ Context::Context(const string &context)
     if (spanId.IsValid()) {
         _spanId = string(&buffer[kTraceLen * 2u], kSpanLen * 2u);
     }
-    // if (parendId.IsValid()) {
-    //     _parentSpanId = string(&buffer[kTraceLen * 2u + kSpanLen * 2u], kSpanLen * 2u);
-    // }
     _sampled = flag.IsSampled();
 
-    unsigned char size[kSizeLen];
-    memcpy(size, context.data() + kTraceLen + kSpanLen * 2u + kFlagLen, kSizeLen);
-    auto baggage = endian::fromBigEndian(*((uint32_t *)size));
+    auto baggage = detail::ReadU32(context.data() + kTraceLen + kSpanLen * 2u + kFlagLen);
     if (baggage == 0) {
         return;
     }
 
     size_t offset = kBinCtxLen;
     for (auto i = 0u; i < baggage; i++) {
-        if (offset + kSizeLen > context.size()) {
+        if (offset > context.size() || kSizeLen > context.size() - offset) {
             return;
         }
-        auto keySize = endian::fromBigEndian(*(uint32_t *)nostd::string_view(context.data() + offset, kSizeLen).data());
+        auto keySize = detail::ReadU32(context.data() + offset);
         offset += kSizeLen;
-        if (offset + keySize > context.size()) {
+        if (offset > context.size() || keySize > context.size() - offset) {
             return;
         }
         auto key = string(context.data() + offset, keySize);
         offset += keySize;
-        if (offset + kSizeLen > context.size()) {
+        if (offset > context.size() || kSizeLen > context.size() - offset) {
             return;
         }
-        auto valSize =
-            endian::fromBigEndian(*(uint32_t *)(nostd::string_view(context.data() + offset, kSizeLen).data()));
+        auto valSize = detail::ReadU32(context.data() + offset);
         offset += kSizeLen;
-        if (offset + valSize > context.size()) {
+        if (offset > context.size() || valSize > context.size() - offset) {
             return;
         }
         auto val = string(context.data() + offset, valSize);
@@ -326,9 +296,9 @@ Context::Context(const string &context)
 }
 
 Context::Context(const trace::SpanContext &context)
-    : _traceId("000000000000000000")
-    , _spanId("000000000")
-    , _parentSpanId("000000000")
+    : _traceId("00000000000000000000000000000000")
+    , _spanId("0000000000000000")
+    , _parentSpanId("0000000000000000")
     , _sampled(false)
     , _baggage() {
     if (!context.IsValid()) {
@@ -377,7 +347,8 @@ Context Tracing::ParseFromJaegerContext(const string &context) noexcept {
 }
 
 string Tracing::FormatAsJaegerContext(const Context &context) noexcept {
-    if (context._traceId.size() != kTraceLen * 2u || context._spanId.size() != kSpanLen * 2u) {
+    if (context._traceId.size() != kTraceLen * 2u || context._spanId.size() != kSpanLen * 2u ||
+        context._parentSpanId.size() != kSpanLen * 2u) {
         return {};
     }
     unsigned char buffer[kTraceLen + kSpanLen + kSpanLen];
@@ -392,7 +363,6 @@ string Tracing::FormatAsJaegerContext(const Context &context) noexcept {
     if (!detail::HexToBinary(context._parentSpanId, buffer + kTraceLen + kSpanLen, kSpanLen)) {
         return {};
     }
-    trace::SpanId parent({(uint8_t *)buffer + kTraceLen + kSpanLen, kSpanLen});
     trace::TraceFlags flag(context._sampled ? trace::TraceFlags::kIsSampled : 0);
     auto state = trace::TraceState::GetDefault();
     for (const auto &item : context._baggage) {
@@ -407,4 +377,4 @@ string Tracing::FormatAsJaegerContext(const Context &context) noexcept {
     return {tc.data(), tc.size()};
 }
 
-} // namespace tracing
+} // namespace Tracing

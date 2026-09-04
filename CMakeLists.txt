@@ -2,24 +2,22 @@ cmake_minimum_required(VERSION 3.16)
 project(Hornet)
 
 set(CMAKE_CXX_STANDARD 11)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_FLAGS "-Wall -Wextra -Wconversion -Wsizeof-pointer-memaccess \
                      -Wfloat-equal -Wconversion-null -Woverflow -Wshadow \
                      -D_FILE_OFFSET_BITS=64 -D_GNU_SOURCE -pthread -g -O0")
 
-include_directories(
-        src
-        test)
-
-file(GLOB_RECURSE SRCS src/*.cpp src/*.cpp)
-file(GLOB_RECURSE HDRS src/*.h src/*.h)
+file(GLOB_RECURSE SRCS CONFIGURE_DEPENDS src/*.cpp)
+file(GLOB_RECURSE HDRS CONFIGURE_DEPENDS src/*.h)
 
 add_library(Hornet STATIC ${SRCS} ${HDRS})
+target_include_directories(Hornet PUBLIC src)
 
 foreach (_target
         Trace)
     add_executable(${_target} "test/${_target}.cpp")
-    target_link_libraries(${_target}
-            ${PROJECT_BINARY_DIR}/libHornet.a
+    target_link_libraries(${_target} PRIVATE
+            Hornet
             opentelemetry_exporter_zipkin_trace
             opentelemetry_exporter_jaeger_trace
             opentelemetry_http_client_curl

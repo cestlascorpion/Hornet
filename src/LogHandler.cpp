@@ -4,7 +4,7 @@
 
 using namespace opentelemetry;
 
-namespace tracing {
+namespace Tracing {
 
 void CustomLogHandler::Handle(sdk::common::internal_log::LogLevel level, const char *file, int line, const char *msg,
                               const sdk::common::AttributeMap &attributes) noexcept {
@@ -21,4 +21,4 @@ void CustomLogHandler::Handle(sdk::common::internal_log::LogLevel level, const c
     std::cout << output_s.str(); // thread safe.
 }
 
-} // namespace tracing
+} // namespace Tracing

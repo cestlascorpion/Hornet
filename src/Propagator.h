@@ -4,7 +4,7 @@
 
 #include <map>
 
-namespace tracing {
+namespace Tracing {
 
 class CustomCarrier final : public opentelemetry::context::propagation::TextMapCarrier {
 public:
@@ -31,4 +31,4 @@ public:
         opentelemetry::nostd::function_ref<bool(opentelemetry::nostd::string_view)> callback) const noexcept override;
 };
 
-} // namespace tracing
+} // namespace Tracing
