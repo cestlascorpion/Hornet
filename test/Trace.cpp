@@ -1,8 +1,10 @@
 #include <chrono>
+#include <cstdint>
 #include <cstring>
 #include <iostream>
 #include <thread>
 
+#include "Binary.h"
 #include "Tracing.h"
 
 using namespace std;
@@ -12,50 +14,18 @@ using namespace opentelemetry;
 using Tracer = Tracing::Tracing;
 
 constexpr const char *hexParentContext =
-    "FEA80376EE0C6F9F"
-    "EC9C673F09F6EAE1" // 9f6f0cee7603a8fee1eaf6093f679cec
-    "9E5304AE5F1682BB" // bb82165fae04539e
-    "0000000000000000" // 000000000
-    "01000000"         // true
-    "01000000"
-    "0870796A5F746573740000000B68656C6C6F20776F726C64";
+    "FEA80376EE0C6F9FEC9C673F09F6EAE1" // trace id
+    "9E5304AE5F1682BB"                 // span id
+    "0000000000000000"                 // parent span id
+    "01"                               // flags
+    "00000001"                         // baggage count
+    "00000008"                         // key length
+    "70796A5F74657374"                 // pyj_test
+    "0000000B"                         // value length
+    "68656C6C6F20776F726C64";          // hello world
 
 constexpr const unsigned cmd = 10u;
 constexpr const unsigned uid = 12345678u;
-
-constexpr int8_t kHexDigits[256] = {
-    -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
-    -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, 0,  1,  2,  3,  4,  5,  6,  7,  8,  9,
-    -1, -1, -1, -1, -1, -1, -1, 10, 11, 12, 13, 14, 15, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
-    -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, 10, 11, 12, 13, 14, 15, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
-    -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
-    -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
-    -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
-    -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
-    -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
-};
-
-unsigned char HexToInt(char c) {
-    return (unsigned char)kHexDigits[uint8_t(c)];
-}
-
-bool HexToBinary(const string &hex, uint8_t *buffer, size_t buffer_size) {
-    memset(buffer, 0, buffer_size);
-    if (hex.size() > buffer_size * 2) {
-        return false;
-    }
-    auto hex_size = (hex.size());
-    auto buffer_pos = buffer_size - (hex_size + 1) / 2;
-    auto last_hex_pos = hex_size - 1;
-    auto i = 0u;
-    for (; i < last_hex_pos; i += 2) {
-        buffer[buffer_pos++] = static_cast<uint8_t>((HexToInt(hex[i]) << 4) | HexToInt(hex[i + 1]));
-    }
-    if (i == last_hex_pos) {
-        buffer[buffer_pos] = HexToInt(hex[i]);
-    }
-    return true;
-}
 
 bool SameContext(const Context &left, const Context &right) {
     return left._traceId == right._traceId && left._spanId == right._spanId && left._sampled == right._sampled;
@@ -96,14 +66,14 @@ bool F3() {
 }
 
 int main() {
-    char buffer[strlen(hexParentContext) / 2];
-    if (!HexToBinary(hexParentContext, (uint8_t *)buffer, sizeof(buffer))) {
+    string buffer(strlen(hexParentContext) / 2u, '\0');
+    if (!Tracing::binary::DecodeHex(hexParentContext, reinterpret_cast<uint8_t *>(&buffer[0]), buffer.size())) {
         cout << "invalid parent context" << endl;
-        return 0;
+        return 1;
     }
 
     cout << "----------------------------------------" << endl;
-    auto ctx = Tracer::ParseFromJaegerContext(string(buffer, sizeof(buffer)));
+    auto ctx = Tracer::ParseFromJaegerContext(buffer);
     cout << "f0:" << ctx._traceId << "-" << ctx._spanId << "-" << ctx._parentSpanId << "-" << ctx._sampled << endl;
     for (const auto &item : ctx._baggage) {
         cout << "\t" << item.first << ": " << item.second << endl;
@@ -111,7 +81,7 @@ int main() {
 
     {
         auto jtx = Tracer::FormatAsJaegerContext(ctx);
-        if (jtx.size() != sizeof(buffer) || memcmp(buffer, jtx.data(), sizeof(buffer)) != 0) {
+        if (jtx.size() != buffer.size() || memcmp(buffer.data(), jtx.data(), buffer.size()) != 0) {
             cout << "FormatAsJaegerContext go wrong" << endl;
             return 1;
         }
@@ -124,7 +94,7 @@ int main() {
 
     cout << "----------------------------------------" << endl;
 
-    if (!F1(string(buffer, sizeof(buffer)))) {
+    if (!F1(buffer)) {
         return 1;
     }
     this_thread::sleep_for(chrono::seconds(2));

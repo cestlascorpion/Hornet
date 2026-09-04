@@ -32,6 +32,14 @@ cmake --build build -j
 
 The example executable is `build/Trace`.
 
+The binary context codec has no OpenTelemetry dependency and can be tested on
+its own:
+
+```sh
+cmake --build build --target HornetBinaryTest
+ctest --test-dir build --output-on-failure
+```
+
 ## Configuration
 
 Set `TRACING_CTRL_CONF` to a YAML configuration file. If it is not set, Hornet
@@ -65,3 +73,9 @@ Tracing::Tracing::Instance()->EndSpan(std::move(scope));
 
 Use `StartIsolatedSpan` when a span must be propagated without changing the
 active runtime context.
+
+## Historical Bugs
+
+See [BUG.md](BUG.md) for a detailed Chinese analysis of the historical binary
+context, test, runtime-context, and build issues, including the remaining
+sampling hot-reload concurrency risk.

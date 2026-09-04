@@ -10,8 +10,20 @@ set(CMAKE_CXX_FLAGS "-Wall -Wextra -Wconversion -Wsizeof-pointer-memaccess \
 file(GLOB_RECURSE SRCS CONFIGURE_DEPENDS src/*.cpp)
 file(GLOB_RECURSE HDRS CONFIGURE_DEPENDS src/*.h)
 
+add_library(HornetBinary STATIC src/Binary.cpp src/Binary.h)
+target_include_directories(HornetBinary PUBLIC src)
+
+list(FILTER SRCS EXCLUDE REGEX "Binary\\.cpp$")
 add_library(Hornet STATIC ${SRCS} ${HDRS})
 target_include_directories(Hornet PUBLIC src)
+target_link_libraries(Hornet PUBLIC HornetBinary)
+
+include(CTest)
+if (BUILD_TESTING)
+    add_executable(HornetBinaryTest test/Binary.cpp)
+    target_link_libraries(HornetBinaryTest PRIVATE HornetBinary)
+    add_test(NAME HornetBinaryTest COMMAND HornetBinaryTest)
+endif ()
 
 foreach (_target
         Trace)
